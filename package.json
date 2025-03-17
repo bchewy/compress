@@ -1,0 +1,17 @@
+{
+  "name": "ultra-compress",
+  "version": "1.0.0",
+  "description": "A web application to compress PDF files while maintaining readability for both humans and LLMs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "pdf",
+    "compression",
+    "drag-and-drop",
+    "llm"
+  ],
+  "author": "",
+  "license": "MIT"
+} 
