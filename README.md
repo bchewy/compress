@@ -13,6 +13,8 @@ A simple web application to compress PDF files while maintaining readability for
 - Size comparison between original and compressed files
 - Side-by-side comparison viewer for original and compressed PDFs
 - Download all compressed files at once
+- Reorder PDFs via drag-and-drop
+- Combine multiple PDFs into a single document
 
 ## How It Works
 
@@ -30,14 +32,17 @@ This approach significantly reduces file size while maintaining readability for 
 
 1. Open `index.html` in a web browser
 2. Drag and drop PDF files onto the drop area or click "Select Files" to choose files
-3. Adjust compression settings as needed:
+3. Arrange the files in your desired order using drag and drop
+4. Adjust compression settings as needed:
    - Lower image quality for smaller file size
    - Lower DPI for further size reduction
-4. Click "Compress Files" to start the compression process
-5. Once compression is complete, you can:
+5. Optionally check "Combine all PDFs into a single file" if you want a merged document
+6. Click "Compress Files" to start the compression process
+7. Once compression is complete, you can:
    - Download individual compressed files
    - Compare the original and compressed versions side by side
    - Download all compressed files at once with the "Download All" button
+   - Download the combined PDF (if you selected that option)
 
 ## Comparison Viewer
 
@@ -46,10 +51,20 @@ The comparison viewer allows you to:
 - Navigate through all pages using the page controls
 - Visually check the quality difference between versions
 
+## File Ordering
+
+You can easily reorder your PDF files before compression:
+- Drag the handle (⋮⋮) on the left side of each file to reorder
+- The order number is displayed next to each file
+- This order determines:
+  - The processing sequence
+  - The page order when combining PDFs into a single document
+
 ## Dependencies
 
 - [PDF.js](https://mozilla.github.io/pdf.js/) - For rendering PDF pages
 - [pdf-lib](https://pdf-lib.js.org/) - For creating new PDF files
+- [SortableJS](https://github.com/SortableJS/Sortable) - For drag and drop reordering
 
 ## Notes
 

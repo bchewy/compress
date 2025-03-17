@@ -13,6 +13,8 @@ const qualityValue = document.getElementById('qualityValue');
 const dpiSlider = document.getElementById('dpi');
 const dpiValue = document.getElementById('dpiValue');
 const downloadAllBtn = document.getElementById('downloadAllBtn');
+const downloadCombinedBtn = document.getElementById('downloadCombinedBtn');
+const combineFilesCheckbox = document.getElementById('combineFiles');
 
 // Comparison modal elements
 const comparisonModal = document.getElementById('comparisonModal');
@@ -27,10 +29,32 @@ const totalPagesSpan = document.getElementById('totalPages');
 // State
 let files = [];
 let compressedFiles = [];
+let combinedPdf = null;
 let currentPage = 1;
 let totalPages = 1;
 let originalPdf = null;
 let compressedPdf = null;
+
+// Initialize Sortable for reordering files
+const sortable = new Sortable(fileList, {
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    chosenClass: 'sortable-chosen',
+    handle: '.drag-handle',
+    onEnd: () => {
+        // Reorder files array based on the new DOM order
+        const newFilesOrder = [];
+        const fileItems = fileList.querySelectorAll('.file-item');
+        
+        fileItems.forEach(item => {
+            const index = parseInt(item.dataset.index);
+            newFilesOrder.push(files[index]);
+        });
+        
+        files = newFilesOrder;
+        updateFileList();
+    }
+});
 
 // Event listeners
 dropArea.addEventListener('dragover', (e) => {
@@ -69,6 +93,7 @@ dpiSlider.addEventListener('input', () => {
 });
 
 downloadAllBtn.addEventListener('click', downloadAllFiles);
+downloadCombinedBtn.addEventListener('click', downloadCombinedFile);
 
 // Modal control
 closeBtn.addEventListener('click', () => {
@@ -115,6 +140,15 @@ function updateFileList() {
     files.forEach((file, index) => {
         const fileItem = document.createElement('div');
         fileItem.className = 'file-item';
+        fileItem.dataset.index = index;
+        
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'drag-handle';
+        dragHandle.innerHTML = '⋮⋮';
+        
+        const orderNum = document.createElement('div');
+        orderNum.className = 'order-num';
+        orderNum.textContent = index + 1;
         
         const fileName = document.createElement('div');
         fileName.className = 'file-name';
@@ -131,6 +165,8 @@ function updateFileList() {
             removeFile(index);
         });
         
+        fileItem.appendChild(dragHandle);
+        fileItem.appendChild(orderNum);
         fileItem.appendChild(fileName);
         fileItem.appendChild(fileSize);
         fileItem.appendChild(removeBtn);
@@ -161,6 +197,16 @@ function formatFileSize(bytes) {
 async function processFiles() {
     compressBtn.disabled = true;
     compressedFiles = [];
+    combinedPdf = null;
+    downloadCombinedBtn.disabled = true;
+    
+    const shouldCombine = combineFilesCheckbox.checked;
+    let combinedPdfDoc = null;
+    
+    if (shouldCombine) {
+        // Create a new PDF document for the combined output
+        combinedPdfDoc = await PDFLib.PDFDocument.create();
+    }
     
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -238,10 +284,27 @@ async function processFiles() {
             
             // Update download all button
             downloadAllBtn.disabled = false;
+            
+            // If combining, add pages to the combined PDF
+            if (shouldCombine && combinedPdfDoc) {
+                await addToCombinedPdf(compressedPdf, combinedPdfDoc);
+            }
         } catch (error) {
             console.error('Error compressing PDF:', error);
             resultName.textContent = `${file.name} (Error: ${error.message || 'Compression failed'})`;
             resultInfo.removeChild(progressContainer);
+        }
+    }
+    
+    // If combining, finalize the combined PDF
+    if (shouldCombine && combinedPdfDoc) {
+        try {
+            const combinedPdfBytes = await combinedPdfDoc.save();
+            combinedPdf = new File([combinedPdfBytes], 'combined.pdf', { type: 'application/pdf' });
+            downloadCombinedBtn.disabled = false;
+        } catch (error) {
+            console.error('Error creating combined PDF:', error);
+            alert('Failed to create combined PDF: ' + (error.message || 'Unknown error'));
         }
     }
     
@@ -330,7 +393,7 @@ async function fetchImageAsUint8Array(dataUrl) {
     return bytes;
 }
 
-// New functions for comparison and download all
+// Functions for comparison, download all, and combining PDFs
 function downloadFile(file) {
     const url = URL.createObjectURL(file);
     const a = document.createElement('a');
@@ -352,6 +415,42 @@ function downloadAllFiles() {
             downloadFile(file);
         }, index * 500); // 500ms delay between downloads
     });
+}
+
+function downloadCombinedFile() {
+    if (!combinedPdf) return;
+    
+    const url = URL.createObjectURL(combinedPdf);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'combined.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+async function addToCombinedPdf(pdfFile, targetPdfDoc) {
+    try {
+        // Load the PDF data
+        const arrayBuffer = await pdfFile.arrayBuffer();
+        
+        // Load the PDF document using pdf-lib
+        const sourceDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+        
+        // Copy pages from source to target
+        const copiedPages = await targetPdfDoc.copyPages(sourceDoc, sourceDoc.getPageIndices());
+        
+        // Add the copied pages to the target document
+        copiedPages.forEach(page => {
+            targetPdfDoc.addPage(page);
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('Error adding to combined PDF:', error);
+        return false;
+    }
 }
 
 async function openComparisonModal(originalFile, compressedFile) {

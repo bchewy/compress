@@ -67,6 +67,22 @@ button:disabled {
     cursor: not-allowed;
 }
 
+#file-list-container {
+    margin: 20px 0;
+}
+
+#file-list-container h3 {
+    color: #2c3e50;
+    margin-bottom: 10px;
+}
+
+.reorder-hint {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 10px;
+    font-style: italic;
+}
+
 .file-list, .results {
     margin: 20px 0;
 }
@@ -80,6 +96,30 @@ button:disabled {
     border-radius: 5px;
     margin-bottom: 10px;
     background-color: #fafafa;
+}
+
+.file-item {
+    cursor: move;
+    transition: background-color 0.2s ease;
+}
+
+.file-item:hover {
+    background-color: #f0f0f0;
+}
+
+.file-item.sortable-ghost {
+    opacity: 0.4;
+}
+
+.file-item.sortable-chosen {
+    background-color: #e6f0ff;
+    border: 1px solid #4a90e2;
+}
+
+.file-item .drag-handle {
+    cursor: move;
+    margin-right: 10px;
+    color: #999;
 }
 
 .file-item .file-name {
@@ -97,6 +137,19 @@ button:disabled {
     margin-left: 10px;
     padding: 5px 10px;
     font-size: 14px;
+}
+
+.file-item .order-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-color: #4a90e2;
+    color: white;
+    font-size: 14px;
+    margin-right: 10px;
 }
 
 .result-item .download-btn, .result-item .compare-btn {
@@ -128,6 +181,17 @@ button:disabled {
 .option input[type="range"] {
     flex: 1;
     margin: 0 15px;
+}
+
+.combine-option {
+    margin: 15px 0;
+    display: flex;
+    align-items: center;
+}
+
+.combine-option input[type="checkbox"] {
+    margin-right: 10px;
+    transform: scale(1.2);
 }
 
 .progress-bar {
@@ -172,6 +236,7 @@ button:disabled {
     display: flex;
     justify-content: center;
     margin-top: 20px;
+    gap: 15px;
 }
 
 #downloadAllBtn {
@@ -182,6 +247,16 @@ button:disabled {
 
 #downloadAllBtn:hover {
     background-color: #219653;
+}
+
+#downloadCombinedBtn {
+    padding: 12px 30px;
+    font-size: 18px;
+    background-color: #9b59b6;
+}
+
+#downloadCombinedBtn:hover {
+    background-color: #8e44ad;
 }
 
 /* PDF Comparison Modal */
