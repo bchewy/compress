@@ -675,7 +675,8 @@ async function analyzeCombinedPdfWithMistral(pdfFile) {
                         type: "document_url",
                         document_url: fileUrl,
                         document_name: pdfFile.name || "combined_document.pdf"
-                    }
+                    },
+                    include_image_base64: true  // Add this parameter to get base64 image data
                 })
             });
             
@@ -707,6 +708,15 @@ async function analyzeCombinedPdfWithMistral(pdfFile) {
             
             const data = await response.json();
             console.log('OCR processing complete');
+            console.log('API response structure:', JSON.stringify(data, null, 2).substring(0, 500) + '...');
+            
+            if (data.pages && data.pages.length > 0 && data.pages[0].images) {
+                console.log(`Found ${data.pages.reduce((count, page) => count + (page.images ? page.images.length : 0), 0)} images in the document`);
+                // Log the structure of the first image if available
+                if (data.pages[0].images && data.pages[0].images.length > 0) {
+                    console.log('First image object structure:', JSON.stringify(data.pages[0].images[0], null, 2));
+                }
+            }
             
             // Clean up - delete the file if possible
             try {
@@ -719,13 +729,106 @@ async function analyzeCombinedPdfWithMistral(pdfFile) {
             // Extract full text and store it for download
             const fullText = data.pages.map(page => page.markdown || page.text).join('\n\n');
             
+            // Extract images from the response
+            const extractedImages = [];
+            const markdownImageRegex = /!\[([^\]]*)\]\(([^)]*)\)/g;
+            
+            // First, check if images are included in the API response
+            data.pages.forEach((page, pageIndex) => {
+                if (page.images && page.images.length > 0) {
+                    page.images.forEach((image, imageIndex) => {
+                        // Try different possible field names for base64 data
+                        const base64Data = image.image_base64 || image.base64_data || image.base64 || image.image_data || null;
+                        
+                        if (base64Data) {
+                            console.log(`Found direct base64 data for image ${pageIndex + 1}-${imageIndex + 1}`);
+                            
+                            // Determine mime type or use default
+                            let mimeType = image.mime_type || image.content_type;
+                            if (!mimeType) {
+                                // Try to infer from image ID
+                                if (image.id && image.id.endsWith('.png')) {
+                                    mimeType = 'image/png';
+                                } else if ((image.id && image.id.endsWith('.jpg')) || (image.id && image.id.endsWith('.jpeg'))) {
+                                    mimeType = 'image/jpeg';
+                                } else {
+                                    mimeType = 'image/jpeg'; // Default
+                                }
+                            }
+                            
+                            extractedImages.push({
+                                pageIndex: pageIndex + 1,
+                                imageIndex: imageIndex + 1,
+                                base64Data: base64Data,
+                                mimeType: mimeType,
+                                originalId: image.id || `image-${pageIndex}-${imageIndex}`,
+                                isLocalReference: false // This is actual image data, not a reference
+                            });
+                        } else if (image.id) {
+                            // No base64 data but we have an ID - this might be a reference
+                            console.log(`Found image reference with ID: ${image.id}`);
+                            
+                            // Create a placeholder with the ID
+                            extractedImages.push({
+                                pageIndex: pageIndex + 1,
+                                imageIndex: imageIndex + 1,
+                                base64Data: `![${image.id}](${image.id})`,
+                                mimeType: 'application/octet-stream',
+                                originalId: image.id,
+                                isLocalReference: !image.id.includes('://') && !image.id.startsWith('//')
+                            });
+                        }
+                    });
+                }
+            });
+            
+            // Next, extract any image references from markdown
+            let match;
+            data.pages.forEach((page, pageIndex) => {
+                const markdown = page.markdown || '';
+                
+                // Reset regex state
+                markdownImageRegex.lastIndex = 0;
+                
+                while ((match = markdownImageRegex.exec(markdown)) !== null) {
+                    const altText = match[1];
+                    const imageUrl = match[2];
+                    
+                    console.log(`Found markdown image reference on page ${pageIndex + 1}: ${match[0]}`);
+                    
+                    // Check if this is a local image reference (no protocol/domain)
+                    const isLocalReference = !imageUrl.includes('://') && !imageUrl.startsWith('//');
+                    
+                    // Check if this image is already in our list (to avoid duplicates)
+                    const isDuplicate = extractedImages.some(img => 
+                        img.originalId === imageUrl || 
+                        (img.base64Data && img.base64Data.includes(imageUrl))
+                    );
+                    
+                    if (!isDuplicate) {
+                        // Add this image reference
+                        extractedImages.push({
+                            pageIndex: pageIndex + 1,
+                            imageIndex: extractedImages.length + 1,
+                            base64Data: match[0], // Store the full markdown reference
+                            mimeType: imageUrl.endsWith('.png') ? 'image/png' : 'image/jpeg',
+                            originalId: imageUrl,
+                            isLocalReference: isLocalReference
+                        });
+                    }
+                }
+            });
+            
+            console.log(`Total extracted images: ${extractedImages.length}`);
+            
             return {
                 pageCount: data.pages.length,
                 totalWords: data.pages.reduce((sum, page) => sum + countWords(page.markdown || page.text), 0),
                 language: detectLanguage(data.pages),
                 hasImages: data.pages.some(page => page.images && page.images.length > 0),
                 extractedText: fullText.substring(0, 200) + '...',
-                fullText: fullText // Store the full text for download
+                fullText: fullText, // Store the full text for download
+                images: extractedImages // Store the extracted images
             };
         } catch (ocrError) {
             // If OCR failed but upload succeeded, make sure to clean up
@@ -1090,13 +1193,141 @@ function displayCombinedPdfMetadata(metadata) {
         </div>
     `;
     
+    // Add images preview if there are any
+    if (metadata.images && metadata.images.length > 0) {
+        const imagesPreview = document.createElement('div');
+        imagesPreview.className = 'images-preview';
+        imagesPreview.innerHTML = '<h4>Extracted Images:</h4>';
+        
+        const imagesContainer = document.createElement('div');
+        imagesContainer.className = 'extracted-images-container';
+        
+        metadata.images.forEach((image, index) => {
+            if (image.base64Data) {
+                const imgWrapper = document.createElement('div');
+                imgWrapper.className = 'extracted-image-wrapper';
+                
+                const img = document.createElement('img');
+                
+                // Handle different image data scenarios
+                if (image.base64Data.startsWith('data:')) {
+                    // Already a data URL
+                    img.src = image.base64Data;
+                    img.alt = `Extracted image ${index + 1}`;
+                } else if (image.base64Data.includes('![') && image.base64Data.includes('](')) {
+                    // This is a markdown image reference, extract the URL
+                    const markdownMatch = image.base64Data.match(/!\[(.*?)\]\((.*?)\)/);
+                    if (markdownMatch && markdownMatch[2]) {
+                        const imageUrl = markdownMatch[2];
+                        const isLocalReference = image.isLocalReference || (!imageUrl.includes('://') && !imageUrl.startsWith('//'));
+                        
+                        if (isLocalReference) {
+                            // This is a local file reference, not a web URL - don't try to fetch it
+                            img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3E' + encodeURIComponent('Image reference: ' + imageUrl) + '%3C%2Ftext%3E%3C%2Fsvg%3E';
+                            img.alt = `Local image reference: ${imageUrl}`;
+                            console.log(`Displaying placeholder for local image reference: ${imageUrl}`);
+                        } else {
+                            // Set a placeholder initially
+                            img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3ELoading%20image...%3C%2Ftext%3E%3C%2Fsvg%3E';
+                            img.alt = `Loading image ${index + 1}...`;
+                            
+                            // Try to fetch the image asynchronously
+                            (async () => {
+                                try {
+                                    // Try to fetch the image directly
+                                    const base64Data = await fetchImageAsBase64(imageUrl);
+                                    
+                                    if (base64Data) {
+                                        img.src = base64Data;
+                                        img.alt = `Extracted image ${index + 1}`;
+                                        console.log(`Successfully loaded image from ${imageUrl}`);
+                                    } else {
+                                        img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3ECould%20not%20load%20image%3C%2Ftext%3E%3C%2Fsvg%3E';
+                                        img.alt = `Could not load: ${imageUrl}`;
+                                        console.warn(`Could not fetch image from ${imageUrl}`);
+                                    }
+                                } catch (error) {
+                                    console.error(`Error fetching image from ${imageUrl}:`, error);
+                                    img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3EError%20loading%20image%3C%2Ftext%3E%3C%2Fsvg%3E';
+                                    img.alt = `Error loading: ${imageUrl}`;
+                                }
+                            })();
+                        }
+                    } else {
+                        img.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='; // 1x1 transparent placeholder
+                    }
+                } else if (image.base64Data.startsWith('Failed to extract')) {
+                    // Error message
+                    img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2212%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3E' + encodeURIComponent(image.base64Data) + '%3C%2Ftext%3E%3C%2Fsvg%3E';
+                    img.alt = image.base64Data;
+                } else {
+                    // Regular base64 data that needs to be converted to a data URL
+                    // Check if it's already properly formatted or needs prefix
+                    if (/^[A-Za-z0-9+/=]+$/.test(image.base64Data.trim())) {
+                        img.src = `data:${image.mimeType || 'image/jpeg'};base64,${image.base64Data}`;
+                    } else {
+                        // Log the problematic data for debugging
+                        console.warn('Non-standard base64 data:', image.base64Data.substring(0, 100) + '...');
+                        img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3EInvalid%20image%20data%3C%2Ftext%3E%3C%2Fsvg%3E';
+                    }
+                }
+                
+                img.alt = `Extracted image ${index + 1}`;
+                img.className = 'extracted-image';
+                
+                const caption = document.createElement('div');
+                caption.className = 'image-caption';
+                caption.textContent = `Page ${image.pageIndex}, Image ${image.imageIndex}${image.originalId ? ' (' + image.originalId + ')' : ''}`;
+                
+                imgWrapper.appendChild(img);
+                imgWrapper.appendChild(caption);
+                imagesContainer.appendChild(imgWrapper);
+            }
+        });
+        
+        imagesPreview.appendChild(imagesContainer);
+        metadataContent.appendChild(imagesPreview);
+    }
+    
+    // Add download buttons container
+    const downloadButtonsContainer = document.createElement('div');
+    downloadButtonsContainer.className = 'download-buttons-container';
+    
     // Add download text button
     const downloadTextBtn = document.createElement('button');
     downloadTextBtn.id = 'downloadTextBtn';
     downloadTextBtn.className = 'download-text-btn';
     downloadTextBtn.textContent = 'Download Extracted Text';
     downloadTextBtn.addEventListener('click', () => downloadExtractedText(metadata.fullText));
-    metadataContent.appendChild(downloadTextBtn);
+    
+    // Add download HTML button (with images)
+    const downloadHtmlBtn = document.createElement('button');
+    downloadHtmlBtn.id = 'downloadHtmlBtn';
+    downloadHtmlBtn.className = 'download-html-btn';
+    downloadHtmlBtn.textContent = 'Download as HTML with Images';
+    downloadHtmlBtn.addEventListener('click', () => {
+        // Show loading state
+        downloadHtmlBtn.textContent = 'Preparing HTML...';
+        downloadHtmlBtn.disabled = true;
+        
+        // Call the async function
+        downloadExtractedHtml(metadata.fullText, metadata.images)
+            .then(() => {
+                // Reset button state
+                downloadHtmlBtn.textContent = 'Download as HTML with Images';
+                downloadHtmlBtn.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error generating HTML:', error);
+                alert('Error creating HTML file: ' + error.message);
+                downloadHtmlBtn.textContent = 'Download as HTML with Images';
+                downloadHtmlBtn.disabled = false;
+            });
+    });
+    
+    downloadButtonsContainer.appendChild(downloadTextBtn);
+    downloadButtonsContainer.appendChild(downloadHtmlBtn);
+    metadataContent.appendChild(downloadButtonsContainer);
 }
 
 /**
@@ -1213,5 +1444,260 @@ async function generatePresignedGetUrl(key) {
     } catch (error) {
         console.error('Error generating pre-signed GET URL:', error);
         throw error;
+    }
+}
+
+/**
+ * Download the extracted text and images as an HTML file
+ * @param {string} text - The extracted text
+ * @param {Array} images - The extracted images
+ */
+async function downloadExtractedHtml(text, images) {
+    if (!text && (!images || images.length === 0)) {
+        alert('No content available to download');
+        return;
+    }
+    
+    // Convert text to HTML paragraphs
+    const htmlText = text
+        ? text
+            .split('\n\n')
+            .map(paragraph => `<p>${paragraph.replace(/\n/g, '<br>')}</p>`)
+            .join('')
+        : '<p>No text was extracted</p>';
+    
+    // Create image HTML if images exist
+    let imagesHtml = '';
+    if (images && images.length > 0) {
+        imagesHtml = '<div class="extracted-images">\n';
+        imagesHtml += '<h2>Extracted Images</h2>\n';
+        
+        // Process images (fetch if needed)
+        for (const [index, image] of images.entries()) {
+            if (image.base64Data) {
+                let imgSrc = '';
+                
+                // Handle different image data scenarios
+                if (image.base64Data.startsWith('data:')) {
+                    // Already a data URL
+                    imgSrc = image.base64Data;
+                } else if (image.base64Data.includes('![') && image.base64Data.includes('](')) {
+                    // This is a markdown image reference, extract the URL
+                    const markdownMatch = image.base64Data.match(/!\[(.*?)\]\((.*?)\)/);
+                    if (markdownMatch && markdownMatch[2]) {
+                        const imageUrl = markdownMatch[2];
+                        const isLocalReference = image.isLocalReference || (!imageUrl.includes('://') && !imageUrl.startsWith('//'));
+                        
+                        if (isLocalReference) {
+                            // This is a local file reference, not a web URL
+                            imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3E' + encodeURIComponent('Image reference: ' + imageUrl) + '%3C%2Ftext%3E%3C%2Fsvg%3E';
+                            console.log(`Using placeholder for local image in HTML export: ${imageUrl}`);
+                        } else {
+                            // Try to fetch the image
+                            try {
+                                const fetchedImage = await fetchImageAsBase64(imageUrl);
+                                if (fetchedImage) {
+                                    imgSrc = fetchedImage;
+                                    console.log(`Successfully fetched image for HTML export: ${imageUrl}`);
+                                } else {
+                                    imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3ECould%20not%20load%20image%3C%2Ftext%3E%3C%2Fsvg%3E';
+                                    console.warn(`Could not fetch image for HTML export: ${imageUrl}`);
+                                }
+                            } catch (error) {
+                                console.error(`Error fetching image for HTML export: ${error.message}`);
+                                imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3EError%20loading%20image%3C%2Ftext%3E%3C%2Fsvg%3E';
+                            }
+                        }
+                    } else {
+                        imgSrc = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='; // 1x1 transparent placeholder
+                    }
+                } else if (image.base64Data.startsWith('Failed to extract')) {
+                    // Error message
+                    imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2212%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3E' + encodeURIComponent(image.base64Data) + '%3C%2Ftext%3E%3C%2Fsvg%3E';
+                } else {
+                    // Regular base64 data that needs to be converted to a data URL
+                    // Check if it's already properly formatted base64
+                    if (/^[A-Za-z0-9+/=]+$/.test(image.base64Data.trim())) {
+                        imgSrc = `data:${image.mimeType || 'image/jpeg'};base64,${image.base64Data}`;
+                    } else {
+                        // Log the problematic data for debugging
+                        console.warn('Non-standard base64 data in HTML export:', image.base64Data.substring(0, 100) + '...');
+                        imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3EInvalid%20image%20data%3C%2Ftext%3E%3C%2Fsvg%3E';
+                    }
+                }
+                
+                imagesHtml += `
+                <div class="image-container">
+                    <h3>Page ${image.pageIndex || 'Unknown'}, Image ${image.imageIndex || index + 1}${image.originalId ? ' (' + image.originalId + ')' : ''}</h3>
+                    <img src="${imgSrc}" 
+                         alt="Extracted image ${index + 1}" 
+                         style="max-width: 100%; height: auto; margin-bottom: 20px;">
+                </div>`;
+            }
+        }
+        
+        imagesHtml += '</div>';
+    }
+    
+    // Create the complete HTML document
+    const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Extracted Content</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                line-height: 1.6;
+                margin: 0;
+                padding: 20px;
+                max-width: 800px;
+                margin: 0 auto;
+            }
+            .content {
+                margin-bottom: 30px;
+            }
+            .extracted-images {
+                margin-top: 30px;
+                border-top: 1px solid #ccc;
+                padding-top: 20px;
+            }
+            .image-container {
+                margin-bottom: 30px;
+            }
+            h1, h2, h3 {
+                color: #333;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Extracted Content</h1>
+        <div class="content">
+            ${htmlText}
+        </div>
+        ${imagesHtml}
+    </body>
+    </html>
+    `;
+    
+    // Create and download the HTML file
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'extracted_content.html';
+    document.body.appendChild(a);
+    a.click();
+    
+    // Clean up
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
+}
+
+// Add CSS styles for the extracted images
+const imageStyles = document.createElement('style');
+imageStyles.textContent = `
+.extracted-images-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-top: 10px;
+    margin-bottom: 20px;
+}
+
+.extracted-image-wrapper {
+    width: 150px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 8px;
+    background-color: #f9f9f9;
+}
+
+.extracted-image {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    border-radius: 3px;
+}
+
+.image-caption {
+    font-size: 12px;
+    text-align: center;
+    margin-top: 5px;
+    color: #666;
+}
+
+.download-buttons-container {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.download-text-btn,
+.download-html-btn {
+    padding: 8px 15px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.download-html-btn {
+    background-color: #2196F3;
+}
+
+.download-text-btn:hover,
+.download-html-btn:hover {
+    opacity: 0.9;
+}
+`;
+
+document.head.appendChild(imageStyles);
+
+/**
+ * Function to fetch an image and convert it to base64
+ * @param {string} url - The URL of the image to fetch
+ * @returns {Promise<string>} - Promise resolving to base64 data URL
+ */
+async function fetchImageAsBase64(url) {
+    try {
+        // If this is a local reference (not a full URL), don't even try to fetch it
+        if (!url.includes('://') && !url.startsWith('//')) {
+            console.log(`Skipping fetch for local image reference: ${url}`);
+            return null;
+        }
+        
+        console.log(`Fetching image from URL: ${url}`);
+        
+        // Try to fetch the image
+        const response = await fetch(url, {
+            method: 'GET',
+            // Don't specify mode: 'cors' to allow browser to decide
+            cache: 'no-cache'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+        }
+        
+        // Get the image as blob
+        const blob = await response.blob();
+        
+        // Convert blob to base64
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (error) {
+        console.error('Error fetching image:', error);
+        return null;
     }
 } 
