@@ -1,45 +1,45 @@
-const http = require('http');
-const fs = require('fs');
+// Load environment variables from .env file
+require('dotenv').config();
+
+const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 
-const PORT = 3000;
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-const MIME_TYPES = {
-    '.html': 'text/html',
-    '.css': 'text/css',
-    '.js': 'text/javascript',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.ico': 'image/x-icon',
-};
+// Middleware to parse JSON
+app.use(express.json());
 
-const server = http.createServer((req, res) => {
-    // Handle requests for the root path
-    let filePath = req.url === '/' ? './index.html' : '.' + req.url;
-    
-    const extname = path.extname(filePath);
-    const contentType = MIME_TYPES[extname] || 'application/octet-stream';
-    
-    fs.readFile(filePath, (err, content) => {
-        if (err) {
-            if (err.code === 'ENOENT') {
-                // File not found
-                res.writeHead(404);
-                res.end('404 Not Found');
-            } else {
-                // Server error
-                res.writeHead(500);
-                res.end(`Server Error: ${err.code}`);
-            }
-        } else {
-            // Success
-            res.writeHead(200, { 'Content-Type': contentType });
-            res.end(content, 'utf-8');
-        }
+// Serve static files from the current directory
+app.use(express.static(__dirname));
+
+// Create a secure config endpoint that generates temporary credentials
+app.get('/api/aws-config', (req, res) => {
+  // Check if all required env variables are available
+  const requiredVars = ['AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_BUCKET_NAME'];
+  const missingVars = requiredVars.filter(varName => !process.env[varName]);
+  
+  if (missingVars.length > 0) {
+    return res.status(500).json({ 
+      error: 'Server configuration error',
+      message: `Missing environment variables: ${missingVars.join(', ')}`
     });
+  }
+
+  // Return AWS configuration
+  res.json({
+    region: process.env.AWS_REGION || 'ap-southeast-1',
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    },
+    bucketName: process.env.AWS_BUCKET_NAME
+  });
 });
 
-server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}/`);
-    console.log('Press Ctrl+C to stop the server');
+// Start the server
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  console.log(`Open http://localhost:${PORT} in your browser`);
 }); 

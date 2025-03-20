@@ -8,8 +8,66 @@
 </head>
 <body>
     <div class="container">
-        <h1>Ultra-Compress PDF</h1>
-        <p>Drop your PDFs here to compress them while keeping them readable for humans and LLMs</p>
+        <h1>compress.bchwy.com</h1>
+        <div class="subtitle">
+            <p>Drop your PDFs here to compress them while keeping them readable for humans and LLMs</p>
+            <a href="https://github.com/bchewy/compress" class="github-link" target="_blank">
+                <svg height="24" viewBox="0 0 16 16" width="24" class="github-icon">
+                    <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+                </svg>
+                GitHub Repository
+            </a>
+        </div>
+        
+        <!-- Collapsible How It Works section -->
+        <details class="how-it-works-collapsible">
+            <summary>How It Works</summary>
+            <div class="how-it-works">
+                <div class="feature-card">
+                    <div class="feature-icon">📄</div>
+                    <div class="feature-content">
+                        <h3>PDF Compression</h3>
+                        <p>Our compression engine intelligently reduces PDF file sizes while maintaining readability:</p>
+                        <ul>
+                            <li>Converts each page to an optimized image at your selected DPI</li>
+                            <li>Applies JPEG compression using your chosen quality setting</li>
+                            <li>Rebuilds a new, lightweight PDF with the optimized images</li>
+                        </ul>
+                        <p class="feature-note">Result: Files that are 70-90% smaller but still perfectly readable by both humans and AI systems.</p>
+                    </div>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">📚</div>
+                    <div class="feature-content">
+                        <h3>PDF Combination</h3>
+                        <p>Merge multiple documents into a single, organized PDF:</p>
+                        <ul>
+                            <li>Compresses each document with your specified settings</li>
+                            <li>Preserves document order as arranged in your file list</li>
+                            <li>Combines all pages into a clean, unified document</li>
+                        </ul>
+                        <p class="feature-note">Perfect for creating course materials, reports, or documentation from multiple sources.</p>
+                    </div>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">🔍</div>
+                    <div class="feature-content">
+                        <h3>OCR Processing</h3>
+                        <p>Extract and analyze text from your combined documents:</p>
+                        <ul>
+                            <li>Securely uploads your PDF to AWS S3 with a temporary pre-signed URL</li>
+                            <li>Processes the document through Mistral AI's advanced OCR service</li>
+                            <li>Extracts text from all content, including images and scanned pages</li>
+                            <li>Automatically deletes your file from S3 after processing</li>
+                            <li>Provides document metadata and downloadable extracted text</li>
+                        </ul>
+                        <p class="feature-note">Your files remain private and are only temporarily stored during the OCR process.</p>
+                    </div>
+                </div>
+            </div>
+        </details>
         
         <div id="drop-area" class="drop-area">
             <p>Drop PDF files here or</p>
@@ -38,6 +96,24 @@
             <div class="combine-option">
                 <input type="checkbox" id="combineFiles">
                 <label for="combineFiles">Combine all PDFs into a single file</label>
+            </div>
+            <div class="api-settings">
+                <details>
+                    <summary>OCR Settings</summary>
+                    <div class="api-key-settings">
+                        <div class="option-row">
+                            <input type="checkbox" id="enableOcr">
+                            <label for="enableOcr">Enable OCR analysis for combined PDF</label>
+                        </div>
+                        <label for="mistralApiKey">Mistral API Key:</label>
+                        <div class="api-key-input">
+                            <input type="password" id="mistralApiKey" placeholder="Enter your Mistral API key">
+                            <button id="saveApiKeyBtn">Save</button>
+                            <button id="clearApiKeyBtn">Clear</button>
+                        </div>
+                        <p class="api-key-info">Required for analyzing combined PDFs with OCR. Your API key is stored locally in your browser.</p>
+                    </div>
+                </details>
             </div>
             <button id="compressBtn" disabled>Compress Files</button>
         </div>
@@ -78,6 +154,36 @@
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <script>
+        // Auto-close the how-it-works details on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const howItWorksDetails = document.querySelector('.how-it-works-collapsible');
+            if (howItWorksDetails) {
+                // Close by default (remove the 'open' attribute)
+                howItWorksDetails.removeAttribute('open');
+                
+                // Add animation when opening/closing
+                howItWorksDetails.addEventListener('toggle', function() {
+                    const content = this.querySelector('.how-it-works');
+                    if (this.open) {
+                        // When opening, start with 0 height and animate to full height
+                        content.style.maxHeight = '0';
+                        content.style.overflow = 'hidden';
+                        content.style.transition = 'max-height 0.3s ease';
+                        setTimeout(() => {
+                            content.style.maxHeight = content.scrollHeight + 'px';
+                        }, 10);
+                        
+                        // After animation completes, remove the height constraint
+                        setTimeout(() => {
+                            content.style.maxHeight = '';
+                            content.style.overflow = '';
+                        }, 300);
+                    }
+                });
+            }
+        });
+    </script>
     <script src="script.js"></script>
 </body>
 </html> 
