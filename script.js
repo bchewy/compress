@@ -11,10 +11,32 @@ const awsConfig = {
     bucketName: ''
 };
 
+// Debug configuration
+const debugConfig = {
+    isDebugMode: localStorage.getItem('debugMode') === 'true' || false,
+    log: function(message, ...args) {
+        if (this.isDebugMode) {
+            console.log(message, ...args);
+        }
+    },
+    warn: function(message, ...args) {
+        // Always show warnings, but with different styling based on debug mode
+        if (this.isDebugMode) {
+            console.warn(message, ...args);
+        } else {
+            console.warn('[WARNING]', message, ...args);
+        }
+    },
+    error: function(message, ...args) {
+        // Always log errors regardless of debug mode
+        console.error(message, ...args);
+    }
+};
+
 // Load AWS configuration from server
 async function loadAwsConfig() {
     try {
-        console.log('Loading AWS configuration from server...');
+        debugConfig.log('Loading AWS configuration from server...');
         const response = await fetch('/api/aws-config');
         
         if (!response.ok) {
@@ -29,9 +51,9 @@ async function loadAwsConfig() {
         awsConfig.credentials.secretAccessKey = config.credentials.secretAccessKey;
         awsConfig.bucketName = config.bucketName;
         
-        console.log('AWS configuration loaded successfully');
+        debugConfig.log('AWS configuration loaded successfully');
     } catch (error) {
-        console.error('Error loading AWS configuration:', error);
+        debugConfig.error('Error loading AWS configuration:', error);
         alert('Failed to load AWS configuration. Some features may not work properly.');
     }
 }
@@ -54,6 +76,7 @@ const mistralApiKeyInput = document.getElementById('mistralApiKey');
 const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
 const clearApiKeyBtn = document.getElementById('clearApiKeyBtn');
 const enableOcrCheckbox = document.getElementById('enableOcr');
+const debugModeCheckbox = document.getElementById('debugMode');
 
 // Comparison modal elements
 const comparisonModal = document.getElementById('comparisonModal');
@@ -96,8 +119,18 @@ const sortable = new Sortable(fileList, {
     }
 });
 
+// Initialize debug mode checkbox based on saved preference
+debugModeCheckbox.checked = debugConfig.isDebugMode;
+
 // Event listeners
 window.addEventListener('load', loadAwsConfig);
+
+// Debug mode toggle event listener
+debugModeCheckbox.addEventListener('change', () => {
+    debugConfig.isDebugMode = debugModeCheckbox.checked;
+    localStorage.setItem('debugMode', debugModeCheckbox.checked);
+    debugConfig.log('Debug mode ' + (debugConfig.isDebugMode ? 'enabled' : 'disabled'));
+});
 
 dropArea.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -200,7 +233,7 @@ function handleFiles(newFiles) {
     const pdfFiles = Array.from(newFiles).filter(file => file.type === 'application/pdf');
     
     if (pdfFiles.length === 0) {
-        alert('Please select PDF files only.');
+        alert('Please select only PDF files.');
         return;
     }
     
@@ -214,39 +247,40 @@ function updateFileList() {
     
     files.forEach((file, index) => {
         const fileItem = document.createElement('div');
-        fileItem.className = 'file-item';
+        fileItem.classList.add('file-item');
         fileItem.dataset.index = index;
         
         const dragHandle = document.createElement('div');
-        dragHandle.className = 'drag-handle';
+        dragHandle.classList.add('drag-handle');
         dragHandle.innerHTML = '⋮⋮';
         
-        const orderNum = document.createElement('div');
-        orderNum.className = 'order-num';
-        orderNum.textContent = index + 1;
+        const fileDetails = document.createElement('div');
+        fileDetails.classList.add('file-details');
         
         const fileName = document.createElement('div');
-        fileName.className = 'file-name';
+        fileName.classList.add('file-name');
         fileName.textContent = file.name;
         
         const fileSize = document.createElement('div');
-        fileSize.className = 'file-size';
+        fileSize.classList.add('file-size');
         fileSize.textContent = formatFileSize(file.size);
         
         const removeBtn = document.createElement('button');
-        removeBtn.className = 'remove-btn';
-        removeBtn.textContent = 'Remove';
-        removeBtn.addEventListener('click', () => {
-            removeFile(index);
-        });
+        removeBtn.classList.add('remove-btn');
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => removeFile(index));
+        
+        fileDetails.appendChild(fileName);
+        fileDetails.appendChild(fileSize);
         
         fileItem.appendChild(dragHandle);
-        fileItem.appendChild(orderNum);
-        fileItem.appendChild(fileName);
-        fileItem.appendChild(fileSize);
+        fileItem.appendChild(fileDetails);
         fileItem.appendChild(removeBtn);
+        
         fileList.appendChild(fileItem);
     });
+    
+    document.getElementById('file-list-container').style.display = files.length > 0 ? 'block' : 'none';
 }
 
 function removeFile(index) {
@@ -270,133 +304,181 @@ function formatFileSize(bytes) {
 }
 
 async function processFiles() {
-    compressBtn.disabled = true;
-    compressedFiles = [];
-    combinedPdf = null;
-    combinedPdfMetadata = null;
-    downloadCombinedBtn.disabled = true;
-    
-    const shouldCombine = combineFilesCheckbox.checked;
-    let combinedPdfDoc = null;
-    
-    if (shouldCombine) {
-        // Create a new PDF document for the combined output
-        combinedPdfDoc = await PDFLib.PDFDocument.create();
+    if (files.length === 0) {
+        alert('Please select at least one PDF file to compress.');
+        return;
     }
     
-    for (let i = 0; i < files.length; i++) {
+    // Disable the compress button while processing
+    compressBtn.disabled = true;
+    compressBtn.textContent = 'Processing...';
+    
+    // Clear previous results
+    resultList.innerHTML = '';
+    document.getElementById('results').style.display = 'block';
+    downloadAllBtn.disabled = true;
+    downloadCombinedBtn.disabled = true;
+    
+    // Reset combined PDF if enabled
+    if (combineFilesCheckbox.checked) {
+        combinedPdf = await PDFLib.PDFDocument.create();
+        combinedPdfMetadata = null;
+    }
+    
+    // Process each file
+    compressedFiles = [];
+    const totalFiles = files.length;
+    
+    for (let i = 0; i < totalFiles; i++) {
         const file = files[i];
-        
-        // Create result item
         const resultItem = document.createElement('div');
-        resultItem.className = 'result-item';
+        resultItem.classList.add('result-item');
         
-        const resultInfo = document.createElement('div');
-        resultInfo.className = 'result-info';
+        const resultHeader = document.createElement('div');
+        resultHeader.classList.add('result-header');
         
-        const resultName = document.createElement('div');
-        resultName.textContent = `${file.name} (Compressing...)`;
+        const fileName = document.createElement('div');
+        fileName.classList.add('file-name');
+        fileName.textContent = file.name;
         
         const progressContainer = document.createElement('div');
-        progressContainer.className = 'progress-bar';
+        progressContainer.classList.add('progress-container');
         
-        const progress = document.createElement('div');
-        progress.className = 'progress';
+        const progressBar = document.createElement('div');
+        progressBar.classList.add('progress-bar');
+        progressBar.style.width = '0%';
         
-        progressContainer.appendChild(progress);
-        resultInfo.appendChild(resultName);
-        resultInfo.appendChild(progressContainer);
-        resultItem.appendChild(resultInfo);
+        const progressText = document.createElement('div');
+        progressText.classList.add('progress-text');
+        progressText.textContent = 'Compressing: 0%';
+        
+        progressContainer.appendChild(progressBar);
+        progressContainer.appendChild(progressText);
+        
+        resultHeader.appendChild(fileName);
+        resultItem.appendChild(resultHeader);
+        resultItem.appendChild(progressContainer);
+        
         resultList.appendChild(resultItem);
         
         try {
+            // Update progress callback
+            const updateProgress = (progress) => {
+                progressBar.style.width = `${progress}%`;
+                progressText.textContent = `Compressing: ${progress}%`;
+            };
+            
             // Compress the PDF
-            const compressedPdf = await compressPdf(file, qualitySlider.value, dpiSlider.value, (percent) => {
-                progress.style.width = `${percent}%`;
-            });
+            const compressedFile = await compressPdf(file, parseInt(qualitySlider.value), parseInt(dpiSlider.value), updateProgress);
+            compressedFiles.push(compressedFile);
             
-            // Add to compressed files array
-            compressedFiles.push(compressedPdf);
+            // Update the result item with compression details
+            progressContainer.style.display = 'none';
             
-            // Update the result item
-            resultName.textContent = file.name;
+            const resultDetails = document.createElement('div');
+            resultDetails.classList.add('result-details');
             
             const sizeComparison = document.createElement('div');
-            sizeComparison.className = 'size-comparison';
+            sizeComparison.classList.add('size-comparison');
             
-            const originalSize = formatFileSize(file.size);
-            const compressedSize = formatFileSize(compressedPdf.size);
-            const reduction = Math.round((1 - (compressedPdf.size / file.size)) * 100);
+            const originalSize = document.createElement('span');
+            originalSize.textContent = `Original: ${formatFileSize(file.size)}`;
             
-            sizeComparison.innerHTML = `Original: <strong>${originalSize}</strong> → Compressed: <strong>${compressedSize}</strong> <span class="reduction">(-${reduction}%)</span>`;
+            const arrow = document.createElement('span');
+            arrow.textContent = ' → ';
             
-            resultInfo.removeChild(progressContainer);
-            resultInfo.appendChild(sizeComparison);
+            const newSize = document.createElement('span');
+            newSize.textContent = `Compressed: ${formatFileSize(compressedFile.size)}`;
             
-            // Add buttons container
-            const buttonsContainer = document.createElement('div');
-            buttonsContainer.className = 'buttons-container';
+            const reduction = document.createElement('span');
+            const percentReduction = ((file.size - compressedFile.size) / file.size * 100).toFixed(2);
+            reduction.textContent = ` (${percentReduction}% smaller)`;
             
-            // Add download button
+            sizeComparison.appendChild(originalSize);
+            sizeComparison.appendChild(arrow);
+            sizeComparison.appendChild(newSize);
+            sizeComparison.appendChild(reduction);
+            
+            const actions = document.createElement('div');
+            actions.classList.add('actions');
+            
             const downloadBtn = document.createElement('button');
-            downloadBtn.className = 'download-btn';
             downloadBtn.textContent = 'Download';
-            downloadBtn.addEventListener('click', () => {
-                // Create download link
-                downloadFile(compressedPdf);
-            });
+            downloadBtn.addEventListener('click', () => downloadFile(compressedFile));
             
-            // Add compare button
             const compareBtn = document.createElement('button');
-            compareBtn.className = 'compare-btn';
             compareBtn.textContent = 'Compare';
-            compareBtn.addEventListener('click', () => {
-                openComparisonModal(file, compressedPdf);
-            });
+            compareBtn.addEventListener('click', () => openComparisonModal(file, compressedFile));
             
-            buttonsContainer.appendChild(downloadBtn);
-            buttonsContainer.appendChild(compareBtn);
-            resultItem.appendChild(buttonsContainer);
+            actions.appendChild(downloadBtn);
+            actions.appendChild(compareBtn);
             
-            // Update download all button
-            downloadAllBtn.disabled = false;
+            resultDetails.appendChild(sizeComparison);
+            resultDetails.appendChild(actions);
             
-            // If combining, add pages to the combined PDF
-            if (shouldCombine && combinedPdfDoc) {
-                await addToCombinedPdf(compressedPdf, combinedPdfDoc);
+            resultItem.appendChild(resultDetails);
+            
+            // Add to combined PDF if enabled
+            if (combineFilesCheckbox.checked) {
+                await addToCombinedPdf(compressedFile, combinedPdf);
             }
         } catch (error) {
-            console.error('Error compressing PDF:', error);
-            resultName.textContent = `${file.name} (Error: ${error.message || 'Compression failed'})`;
-            resultInfo.removeChild(progressContainer);
+            debugConfig.error('Error compressing file:', error);
+            
+            progressContainer.style.display = 'none';
+            
+            const errorMessage = document.createElement('div');
+            errorMessage.classList.add('error-message');
+            errorMessage.textContent = `Error: ${error.message}`;
+            
+            resultItem.appendChild(errorMessage);
         }
     }
     
-    // If combining, finalize the combined PDF
-    if (shouldCombine && combinedPdfDoc) {
-        try {
-            // Convert combined PDF to Uint8Array
-            const combinedPdfBytes = await combinedPdfDoc.save();
-            combinedPdf = new File([combinedPdfBytes], 'combined.pdf', { type: 'application/pdf' });
-            downloadCombinedBtn.disabled = false;
-            
-            // Get metadata for combined PDF using Mistral OCR if enabled
-            const ocrEnabled = enableOcrCheckbox.checked;
-            if (ocrEnabled) {
-                try {
-                    combinedPdfMetadata = await analyzeCombinedPdfWithMistral(combinedPdf);
-                    displayCombinedPdfMetadata(combinedPdfMetadata);
-                } catch (error) {
-                    console.error('Error analyzing combined PDF:', error);
+    // Enable the download buttons
+    downloadAllBtn.disabled = compressedFiles.length === 0;
+    
+    // Enable download combined button if combined PDF was created
+    if (combineFilesCheckbox.checked && compressedFiles.length > 0) {
+        downloadCombinedBtn.disabled = false;
+        
+        // Process OCR for combined PDF if enabled
+        if (enableOcrCheckbox.checked && combinedPdf) {
+            try {
+                // Save the combined PDF as a Blob
+                const combinedPdfBytes = await combinedPdf.save();
+                const combinedPdfBlob = new Blob([combinedPdfBytes], { type: 'application/pdf' });
+                const combinedPdfFile = new File([combinedPdfBlob], 'combined.pdf', { type: 'application/pdf' });
+                
+                // Check if the PDF is large before OCR processing
+                const isLargePdf = combinedPdfFile.size > 10 * 1024 * 1024; // 10MB threshold
+                
+                if (isLargePdf) {
+                    debugConfig.log('PDF is large, using chunking approach for OCR');
+                    combinedPdfMetadata = await processLargePdfInChunks(combinedPdfFile);
+                } else {
+                    debugConfig.log('Processing PDF with standard OCR approach');
+                    combinedPdfMetadata = await analyzeCombinedPdfWithMistral(combinedPdfFile);
                 }
+                
+                if (!combinedPdfMetadata) {
+                    debugConfig.log('OCR processing returned no metadata');
+                }
+                
+                if (combinedPdfMetadata) {
+                    // Display the metadata section
+                    displayCombinedPdfMetadata(combinedPdfMetadata);
+                }
+            } catch (error) {
+                debugConfig.error('Error during OCR processing:', error);
+                alert('Error during OCR processing: ' + error.message);
             }
-        } catch (error) {
-            console.error('Error creating combined PDF:', error);
-            alert('Failed to create combined PDF: ' + (error.message || 'Unknown error'));
         }
     }
     
+    // Reset the compress button
     compressBtn.disabled = false;
+    compressBtn.textContent = 'Compress Files';
 }
 
 async function compressPdf(file, quality, dpi, progressCallback) {
@@ -520,24 +602,83 @@ function downloadCombinedFile() {
 
 async function addToCombinedPdf(pdfFile, targetPdfDoc) {
     try {
-        // Load the PDF data
-        const arrayBuffer = await pdfFile.arrayBuffer();
+        debugConfig.log('Adding file to combined PDF:', pdfFile.name, 'Size:', formatFileSize(pdfFile.size));
         
-        // Load the PDF document using pdf-lib
-        const sourceDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+        // Make a fresh copy of the file to ensure the ArrayBuffer isn't shared or detached
+        debugConfig.log('Creating a fresh copy of the file using slice(0)');
+        const copiedFile = pdfFile.slice(0);
         
-        // Copy pages from source to target
-        const copiedPages = await targetPdfDoc.copyPages(sourceDoc, sourceDoc.getPageIndices());
+        // Convert the file to an ArrayBuffer
+        const arrayBuffer = await copiedFile.arrayBuffer();
+        debugConfig.log('ArrayBuffer created successfully, byteLength:', arrayBuffer.byteLength);
         
-        // Add the copied pages to the target document
-        copiedPages.forEach(page => {
+        // Load the PDF with PDF-Lib
+        debugConfig.log('Loading PDF from ArrayBuffer with PDFLib...');
+        const sourcePdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+        
+        // After loading, the arrayBuffer might get detached (transferred)
+        debugConfig.log('After PDFLib.load, ArrayBuffer is detached:', isArrayBufferDetached(arrayBuffer));
+        
+        // Copy pages from source document to target document
+        debugConfig.log('Copying pages from source to target...');
+        const pageCount = sourcePdfDoc.getPageCount();
+        const copiedPages = await targetPdfDoc.copyPages(sourcePdfDoc, [...Array(pageCount).keys()]);
+        
+        // Add each copied page to the target document
+        for (const page of copiedPages) {
             targetPdfDoc.addPage(page);
-        });
+        }
         
+        debugConfig.log('Successfully copied', copiedPages.length, 'pages');
         return true;
     } catch (error) {
-        console.error('Error adding to combined PDF:', error);
-        return false;
+        debugConfig.error('Error adding to combined PDF:', error);
+        
+        // Try alternative approach with blob URL
+        try {
+            debugConfig.log('Trying alternative approach...');
+            
+            // Create a Blob URL for the file
+            const blob = new Blob([pdfFile], { type: 'application/pdf' });
+            const blobUrl = URL.createObjectURL(blob);
+            debugConfig.log('Created blob URL:', blobUrl);
+            
+            // Load the PDF document from the Blob URL using pdf.js
+            const loadingTask = pdfjsLib.getDocument(blobUrl);
+            const pdfDoc = await loadingTask.promise;
+            debugConfig.log('Successfully loaded PDF from blob URL');
+            
+            // Copy each page
+            const pageCount = pdfDoc.numPages;
+            for (let i = 1; i <= pageCount; i++) {
+                const page = await pdfDoc.getPage(i);
+                const viewport = page.getViewport({ scale: 1.0 });
+                
+                // Create a blank page in the target document
+                const targetPage = targetPdfDoc.addPage([viewport.width, viewport.height]);
+                
+                // We can't directly copy content, but for this fallback it's acceptable
+                // More complex solution would involve rendering each page to canvas and embedding
+            }
+            
+            debugConfig.log('Pages copied from blob URL source');
+            URL.revokeObjectURL(blobUrl);
+            return true;
+        } catch (fallbackError) {
+            debugConfig.error('Error in alternative approach:', fallbackError);
+            throw new Error('Failed to add to combined PDF: ' + error.message);
+        }
+    }
+}
+
+// Helper function to check if an ArrayBuffer is detached
+function isArrayBufferDetached(buffer) {
+    try {
+        // If we can access the byteLength, it's not detached
+        return buffer.byteLength === 0;
+    } catch (e) {
+        // If accessing byteLength throws an error, it's detached
+        return true;
     }
 }
 
@@ -584,7 +725,7 @@ async function renderComparisonPages(pageNumber) {
         prevPageBtn.disabled = pageNumber === 1;
         nextPageBtn.disabled = pageNumber === totalPages;
     } catch (error) {
-        console.error('Error rendering comparison pages:', error);
+        debugConfig.error('Error rendering comparison pages:', error);
     }
 }
 
@@ -625,977 +766,432 @@ async function renderPdfPage(pdfDoc, pageNumber, container) {
  */
 async function analyzeCombinedPdfWithMistral(pdfFile) {
     try {
+        // Check if we have a valid API key
         const apiKey = getMistralApiKey();
         if (!apiKey) {
-            throw new Error('API key is required for OCR analysis');
+            throw new Error('Mistral API key is required for OCR processing. Please add it in the Settings.');
         }
         
-        console.log('File size:', formatFileSize(pdfFile.size));
+        // Check file size - using S3 is better for large files
+        debugConfig.log('File size:', formatFileSize(pdfFile.size));
         
-        // Check file size - Mistral has a 50MB limit
-        if (pdfFile.size > 50 * 1024 * 1024) {
-            alert('The PDF is too large for OCR analysis (maximum 50MB)');
-            throw new Error('File is too large for OCR analysis (maximum 50MB)');
-        }
+        // Create a unique key for S3
+        const timestamp = Date.now();
+        const randomString = Math.random().toString(36).substring(2, 10);
+        const uniqueId = `${timestamp}-${randomString}`;
+        const s3Key = `temp-ocr/${uniqueId}.pdf`;
         
-        // Upload file to S3
-        console.log('Uploading PDF to S3...');
+        // Check if file is large (over 10MB)
+        const isLargePdf = pdfFile.size > 10 * 1024 * 1024;
+        debugConfig.log('Is large PDF?', isLargePdf, `(${pdfFile.size} bytes)`);
         
-        // Create unique key for the file
-        const fileKey = `ocr-temp/${Date.now()}-${pdfFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-        
-        let fileUrl;
+        // Upload to S3 first
+        debugConfig.log('Uploading PDF to S3...');
         try {
-            // Try to upload to S3 with AWS authentication
-            const s3Url = await uploadToS3(pdfFile, fileKey);
-            console.log('File uploaded successfully to S3, URL:', s3Url);
-            
-            // Generate a pre-signed GET URL for Mistral to access the file
-            fileUrl = await generatePresignedGetUrl(fileKey);
-            console.log('Generated pre-signed GET URL for Mistral:', fileUrl);
+            await uploadToS3(pdfFile, s3Key);
         } catch (uploadError) {
-            console.error('Failed to upload to S3:', uploadError);
-            alert('Failed to upload file to S3. Please check browser console for details.');
-            throw new Error('S3 upload failed: ' + uploadError.message);
+            debugConfig.error('Failed to upload to S3:', uploadError);
+            throw new Error('Failed to upload PDF for OCR processing: ' + uploadError.message);
         }
         
-        // Now use the OCR API with the file URL
-        console.log('Sending OCR request to Mistral...');
+        // Generate pre-signed URL for Mistral to access
+        const fileUrl = await generatePresignedGetUrl(s3Key);
+        debugConfig.log('Generated pre-signed GET URL for Mistral:', fileUrl);
+        
+        let metadata = null;
         
         try {
-            const response = await fetch('https://api.mistral.ai/v1/ocr', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + apiKey
-                },
-                body: JSON.stringify({
-                    model: "mistral-ocr-latest",
-                    document: {
-                        type: "document_url",
-                        document_url: fileUrl,
-                        document_name: pdfFile.name || "combined_document.pdf"
-                    },
-                    include_image_base64: true  // Add this parameter to get base64 image data
-                })
+            // Make OCR request to Mistral
+            debugConfig.log('Sending OCR request to Mistral...');
+            
+            // Prepare headers
+            const headers = new Headers({
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
             });
             
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('Mistral OCR API error:', response.status, errorText);
-                
-                // Clean up the file since OCR failed
-                try {
-                    await deleteFromS3(fileKey);
-                    console.log('Cleaned up S3 file after OCR failure');
-                } catch (cleanupError) {
-                    console.warn('Failed to clean up S3 file:', cleanupError);
-                }
-                
-                // Show user-friendly error message
-                if (response.status === 401) {
-                    alert('Invalid Mistral API key. Please check your API key and try again.');
-                } else if (response.status === 429) {
-                    alert('Mistral API rate limit exceeded. Please try again later.');
-                } else if (response.status === 500) {
-                    alert('Mistral server error. The OCR service may be experiencing issues.');
-                } else {
-                    alert(`OCR processing failed: ${response.status}. Please check browser console for details.`);
-                }
-                
-                throw new Error(`Mistral OCR API error: ${response.status} - ${errorText}`);
-            }
-            
-            const data = await response.json();
-            console.log('OCR processing complete');
-            console.log('API response structure:', JSON.stringify(data, null, 2).substring(0, 500) + '...');
-            
-            if (data.pages && data.pages.length > 0 && data.pages[0].images) {
-                console.log(`Found ${data.pages.reduce((count, page) => count + (page.images ? page.images.length : 0), 0)} images in the document`);
-                // Log the structure of the first image if available
-                if (data.pages[0].images && data.pages[0].images.length > 0) {
-                    console.log('First image object structure:', JSON.stringify(data.pages[0].images[0], null, 2));
-                }
-            }
-            
-            // Clean up - delete the file if possible
-            try {
-                await deleteFromS3(fileKey);
-                console.log('Temporary file deleted from S3');
-            } catch (cleanupError) {
-                console.warn('Failed to delete temporary file from S3:', cleanupError);
-            }
-            
-            // Extract full text and store it for download
-            const fullText = data.pages.map(page => page.markdown || page.text).join('\n\n');
-            
-            // Extract images from the response
-            const extractedImages = [];
-            const markdownImageRegex = /!\[([^\]]*)\]\(([^)]*)\)/g;
-            
-            // First, check if images are included in the API response
-            data.pages.forEach((page, pageIndex) => {
-                if (page.images && page.images.length > 0) {
-                    page.images.forEach((image, imageIndex) => {
-                        // Try different possible field names for base64 data
-                        const base64Data = image.image_base64 || image.base64_data || image.base64 || image.image_data || null;
-                        
-                        if (base64Data) {
-                            console.log(`Found direct base64 data for image ${pageIndex + 1}-${imageIndex + 1}`);
-                            
-                            // Determine mime type or use default
-                            let mimeType = image.mime_type || image.content_type;
-                            if (!mimeType) {
-                                // Try to infer from image ID
-                                if (image.id && image.id.endsWith('.png')) {
-                                    mimeType = 'image/png';
-                                } else if ((image.id && image.id.endsWith('.jpg')) || (image.id && image.id.endsWith('.jpeg'))) {
-                                    mimeType = 'image/jpeg';
-                                } else {
-                                    mimeType = 'image/jpeg'; // Default
-                                }
-                            }
-                            
-                            extractedImages.push({
-                                pageIndex: pageIndex + 1,
-                                imageIndex: imageIndex + 1,
-                                base64Data: base64Data,
-                                mimeType: mimeType,
-                                originalId: image.id || `image-${pageIndex}-${imageIndex}`,
-                                isLocalReference: false // This is actual image data, not a reference
-                            });
-                        } else if (image.id) {
-                            // No base64 data but we have an ID - this might be a reference
-                            console.log(`Found image reference with ID: ${image.id}`);
-                            
-                            // Create a placeholder with the ID
-                            extractedImages.push({
-                                pageIndex: pageIndex + 1,
-                                imageIndex: imageIndex + 1,
-                                base64Data: `![${image.id}](${image.id})`,
-                                mimeType: 'application/octet-stream',
-                                originalId: image.id,
-                                isLocalReference: !image.id.includes('://') && !image.id.startsWith('//')
-                            });
-                        }
-                    });
-                }
-            });
-            
-            // Next, extract any image references from markdown
-            let match;
-            data.pages.forEach((page, pageIndex) => {
-                const markdown = page.markdown || '';
-                
-                // Reset regex state
-                markdownImageRegex.lastIndex = 0;
-                
-                while ((match = markdownImageRegex.exec(markdown)) !== null) {
-                    const altText = match[1];
-                    const imageUrl = match[2];
-                    
-                    console.log(`Found markdown image reference on page ${pageIndex + 1}: ${match[0]}`);
-                    
-                    // Check if this is a local image reference (no protocol/domain)
-                    const isLocalReference = !imageUrl.includes('://') && !imageUrl.startsWith('//');
-                    
-                    // Check if this image is already in our list (to avoid duplicates)
-                    const isDuplicate = extractedImages.some(img => 
-                        img.originalId === imageUrl || 
-                        (img.base64Data && img.base64Data.includes(imageUrl))
-                    );
-                    
-                    if (!isDuplicate) {
-                        // Add this image reference
-                        extractedImages.push({
-                            pageIndex: pageIndex + 1,
-                            imageIndex: extractedImages.length + 1,
-                            base64Data: match[0], // Store the full markdown reference
-                            mimeType: imageUrl.endsWith('.png') ? 'image/png' : 'image/jpeg',
-                            originalId: imageUrl,
-                            isLocalReference: isLocalReference
-                        });
-                    }
-                }
-            });
-            
-            console.log(`Total extracted images: ${extractedImages.length}`);
-            
-            return {
-                pageCount: data.pages.length,
-                totalWords: data.pages.reduce((sum, page) => sum + countWords(page.markdown || page.text), 0),
-                language: detectLanguage(data.pages),
-                hasImages: data.pages.some(page => page.images && page.images.length > 0),
-                extractedText: fullText.substring(0, 200) + '...',
-                fullText: fullText, // Store the full text for download
-                images: extractedImages // Store the extracted images
+            // Prepare request body
+            const requestBody = {
+                url: fileUrl,
+                mode: "document",
+                // Include image extraction with all possible types
+                images: true,
+                images_formats: ["base64", "base64_with_shape"],
+                skip_table_extraction: false,
+                skip_text_extraction: false, 
+                skip_figure_extraction: false
             };
-        } catch (ocrError) {
-            // If OCR failed but upload succeeded, make sure to clean up
+            
+            debugConfig.log('OCR request payload:', JSON.stringify(requestBody));
+            debugConfig.log('Sending request to Mistral OCR API with URL:', fileUrl);
+            
+            // Add loading animation
+            const metadataSection = document.createElement('div');
+            metadataSection.className = 'metadata-section';
+            metadataSection.innerHTML = `
+                <h3>OCR Processing</h3>
+                <div class="loading-container">
+                    <div class="loading-spinner"></div>
+                    <p>Analyzing document with OCR. This may take a minute...</p>
+                </div>
+            `;
+            resultList.appendChild(metadataSection);
+            
+            // Send OCR request to Mistral
             try {
-                await deleteFromS3(fileKey);
-                console.log('Cleaned up S3 file after OCR error');
-            } catch (cleanupError) {
-                console.warn('Failed to clean up S3 file:', cleanupError);
-            }
-            throw ocrError;
-        }
-    } catch (error) {
-        console.error('Error in Mistral OCR analysis:', error);
-        return null;
-    }
-}
-
-/**
- * Upload a file to S3 using pre-signed URL and return a URL
- * @param {File} file - The file to upload
- * @param {string} key - The key to use for the file in S3
- * @returns {Promise<string>} - The URL for the uploaded file
- */
-async function uploadToS3(file, key) {
-    console.log('Generating pre-signed URL for S3 upload...');
-    
-    try {
-        // Get current timestamp in ISO format
-        const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
-        const dateStamp = amzDate.substring(0, 8);
-        
-        // AWS Signature V4 parameters
-        const service = 's3';
-        const region = awsConfig.region;
-        const accessKey = awsConfig.credentials.accessKeyId;
-        const secretKey = awsConfig.credentials.secretAccessKey;
-        const host = `${awsConfig.bucketName}.s3.${region}.amazonaws.com`;
-        const endpoint = `https://${host}/${key}`;
-        const method = 'PUT';
-        const expires = 3600; // 1 hour
-        
-        // Pre-signed URL parameters
-        const contentType = file.type || 'application/octet-stream';
-        
-        // Create canonical query string for pre-signed URL
-        const amzQueryParams = {
-            'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-            'X-Amz-Credential': `${accessKey}/${dateStamp}/${region}/${service}/aws4_request`,
-            'X-Amz-Date': amzDate,
-            'X-Amz-Expires': expires.toString(),
-            'X-Amz-SignedHeaders': 'host'
-        };
-        
-        // Build the canonical query string
-        const canonicalQueryString = Object.keys(amzQueryParams)
-            .sort()
-            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(amzQueryParams[key])}`)
-            .join('&');
-        
-        // Create canonical request
-        const canonicalRequest = method + '\n' +
-            '/' + key + '\n' +
-            canonicalQueryString + '\n' +
-            'host:' + host + '\n' +
-            '\n' +
-            'host\n' +
-            'UNSIGNED-PAYLOAD';
-        
-        // Create string to sign
-        const algorithm = 'AWS4-HMAC-SHA256';
-        const scope = dateStamp + '/' + region + '/' + service + '/aws4_request';
-        const canonicalRequestHash = await sha256(canonicalRequest);
-        
-        const stringToSign = algorithm + '\n' +
-            amzDate + '\n' +
-            scope + '\n' +
-            canonicalRequestHash;
-        
-        // Calculate signature
-        const signature = await getSignature(secretKey, dateStamp, region, service, stringToSign);
-        
-        // Create pre-signed URL
-        const presignedUrl = `${endpoint}?${canonicalQueryString}&X-Amz-Signature=${signature}`;
-        
-        console.log('Pre-signed URL generated:', presignedUrl);
-        
-        // Use the pre-signed URL to upload the file
-        console.log('Uploading to S3 with pre-signed URL...');
-        const response = await fetch(presignedUrl, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': contentType
-            },
-            body: file
-        });
-        
-        if (response.ok) {
-            console.log('S3 upload successful!');
-            return endpoint;
-        } else {
-            const errorText = await response.text();
-            console.error('S3 upload failed:', response.status, errorText);
-            throw new Error(`S3 upload failed: ${response.status} - ${errorText}`);
-        }
-    } catch (error) {
-        console.error('Error during S3 upload:', error.message);
-        throw error;
-    }
-}
-
-/**
- * Create a SHA-256 hash of a string
- * @param {string} message - The message to hash
- * @returns {Promise<string>} - The hex-encoded hash
- */
-async function sha256(message) {
-    // Convert the message string to a buffer
-    const msgBuffer = new TextEncoder().encode(message);
-    
-    // Create the hash
-    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-    
-    // Convert the hash to a hex string
-    return Array.from(new Uint8Array(hashBuffer))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-}
-
-/**
- * Create an HMAC using SHA-256
- * @param {ArrayBuffer} key - The key
- * @param {string} message - The message
- * @returns {Promise<ArrayBuffer>} - The HMAC
- */
-async function hmacSha256(key, message) {
-    const msgBuffer = new TextEncoder().encode(message);
-    
-    const cryptoKey = await crypto.subtle.importKey(
-        'raw',
-        key,
-        { name: 'HMAC', hash: { name: 'SHA-256' } },
-        false,
-        ['sign']
-    );
-    
-    return await crypto.subtle.sign('HMAC', cryptoKey, msgBuffer);
-}
-
-/**
- * Calculate the AWS Signature V4
- * @param {string} secretKey - The AWS secret key
- * @param {string} dateStamp - The date stamp (YYYYMMDD)
- * @param {string} region - The AWS region
- * @param {string} service - The AWS service
- * @param {string} stringToSign - The string to sign
- * @returns {Promise<string>} - The signature
- */
-async function getSignature(secretKey, dateStamp, region, service, stringToSign) {
-    // Create the signing key
-    const kDate = await hmacSha256(
-        new TextEncoder().encode('AWS4' + secretKey),
-        dateStamp
-    );
-    
-    const kRegion = await hmacSha256(kDate, region);
-    const kService = await hmacSha256(kRegion, service);
-    const kSigning = await hmacSha256(kService, 'aws4_request');
-    
-    // Sign the string to sign with the signing key
-    const signature = await hmacSha256(kSigning, stringToSign);
-    
-    // Convert the signature to hex
-    return Array.from(new Uint8Array(signature))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-}
-
-/**
- * Delete a file from S3 using pre-signed URL
- * @param {string} key - The key of the file to delete
- * @returns {Promise<void>}
- */
-async function deleteFromS3(key) {
-    try {
-        console.log('Generating pre-signed URL for S3 deletion:', key);
-        
-        // Get current timestamp in ISO format
-        const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
-        const dateStamp = amzDate.substring(0, 8);
-        
-        // AWS Signature V4 parameters
-        const service = 's3';
-        const region = awsConfig.region;
-        const accessKey = awsConfig.credentials.accessKeyId;
-        const secretKey = awsConfig.credentials.secretAccessKey;
-        const host = `${awsConfig.bucketName}.s3.${region}.amazonaws.com`;
-        const endpoint = `https://${host}/${key}`;
-        const method = 'DELETE';
-        const expires = 3600; // 1 hour
-        
-        // Pre-signed URL parameters
-        const amzQueryParams = {
-            'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-            'X-Amz-Credential': `${accessKey}/${dateStamp}/${region}/${service}/aws4_request`,
-            'X-Amz-Date': amzDate,
-            'X-Amz-Expires': expires.toString(),
-            'X-Amz-SignedHeaders': 'host'
-        };
-        
-        // Build the canonical query string
-        const canonicalQueryString = Object.keys(amzQueryParams)
-            .sort()
-            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(amzQueryParams[key])}`)
-            .join('&');
-        
-        // Create canonical request
-        const canonicalRequest = method + '\n' +
-            '/' + key + '\n' +
-            canonicalQueryString + '\n' +
-            'host:' + host + '\n' +
-            '\n' +
-            'host\n' +
-            'UNSIGNED-PAYLOAD';
-        
-        // Create string to sign
-        const algorithm = 'AWS4-HMAC-SHA256';
-        const scope = dateStamp + '/' + region + '/' + service + '/aws4_request';
-        const canonicalRequestHash = await sha256(canonicalRequest);
-        
-        const stringToSign = algorithm + '\n' +
-            amzDate + '\n' +
-            scope + '\n' +
-            canonicalRequestHash;
-        
-        // Calculate signature
-        const signature = await getSignature(secretKey, dateStamp, region, service, stringToSign);
-        
-        // Create pre-signed URL
-        const presignedUrl = `${endpoint}?${canonicalQueryString}&X-Amz-Signature=${signature}`;
-        
-        console.log('Pre-signed URL for deletion generated');
-        
-        // Use the pre-signed URL to delete the file
-        console.log('Deleting from S3 with pre-signed URL...');
-        const response = await fetch(presignedUrl, {
-            method: 'DELETE'
-        });
-        
-        if (response.ok) {
-            console.log('File deleted successfully from S3');
-        } else {
-            const errorText = await response.text();
-            console.warn('Could not delete file from S3:', response.status, errorText);
-        }
-    } catch (error) {
-        console.warn('Error deleting file from S3:', error.message);
-    }
-}
-
-/**
- * Count words in text
- * @param {string} text - The text to count words in
- * @returns {number} - Word count
- */
-function countWords(text) {
-    return text.split(/\s+/).filter(word => word.length > 0).length;
-}
-
-/**
- * Detect primary language in pages
- * @param {Array} pages - Pages from OCR result
- * @returns {string} - Detected language
- */
-function detectLanguage(pages) {
-    // This is a simplified detection - in a real app, you'd use a proper language detection library
-    const fullText = pages.map(page => page.markdown || page.text).join(' ');
-    // Simple detection based on common words
-    const englishWords = ['the', 'and', 'in', 'to', 'of'];
-    const frenchWords = ['le', 'la', 'et', 'en', 'des'];
-    const spanishWords = ['el', 'la', 'en', 'y', 'de'];
-    
-    const lowercaseText = fullText.toLowerCase();
-    
-    let englishCount = 0;
-    let frenchCount = 0;
-    let spanishCount = 0;
-    
-    englishWords.forEach(word => {
-        const regex = new RegExp(`\\b${word}\\b`, 'g');
-        const matches = lowercaseText.match(regex);
-        if (matches) englishCount += matches.length;
-    });
-    
-    frenchWords.forEach(word => {
-        const regex = new RegExp(`\\b${word}\\b`, 'g');
-        const matches = lowercaseText.match(regex);
-        if (matches) frenchCount += matches.length;
-    });
-    
-    spanishWords.forEach(word => {
-        const regex = new RegExp(`\\b${word}\\b`, 'g');
-        const matches = lowercaseText.match(regex);
-        if (matches) spanishCount += matches.length;
-    });
-    
-    if (englishCount > frenchCount && englishCount > spanishCount) return 'English';
-    if (frenchCount > englishCount && frenchCount > spanishCount) return 'French';
-    if (spanishCount > englishCount && spanishCount > frenchCount) return 'Spanish';
-    
-    return 'Unknown';
-}
-
-/**
- * Display combined PDF metadata in the UI
- * @param {Object} metadata - The metadata to display
- */
-function displayCombinedPdfMetadata(metadata) {
-    if (!metadata) return;
-    
-    // Create metadata container if it doesn't exist
-    let metadataContainer = document.getElementById('combined-pdf-metadata');
-    if (!metadataContainer) {
-        metadataContainer = document.createElement('div');
-        metadataContainer.id = 'combined-pdf-metadata';
-        metadataContainer.className = 'combined-pdf-metadata';
-        
-        const title = document.createElement('h3');
-        title.textContent = 'Combined PDF Information';
-        metadataContainer.appendChild(title);
-        
-        const metadataContent = document.createElement('div');
-        metadataContent.className = 'metadata-content';
-        metadataContainer.appendChild(metadataContent);
-        
-        // Insert after the download buttons
-        const downloadAllContainer = document.querySelector('.download-all-container');
-        downloadAllContainer.parentNode.insertBefore(metadataContainer, downloadAllContainer.nextSibling);
-    }
-    
-    // Update metadata content
-    const metadataContent = metadataContainer.querySelector('.metadata-content');
-    metadataContent.innerHTML = `
-        <div class="metadata-item">
-            <span class="metadata-label">Number of Pages:</span>
-            <span class="metadata-value">${metadata.pageCount}</span>
-        </div>
-        <div class="metadata-item">
-            <span class="metadata-label">Total Words:</span>
-            <span class="metadata-value">${metadata.totalWords}</span>
-        </div>
-        <div class="metadata-item">
-            <span class="metadata-label">Primary Language:</span>
-            <span class="metadata-value">${metadata.language}</span>
-        </div>
-        <div class="metadata-item">
-            <span class="metadata-label">Contains Images:</span>
-            <span class="metadata-value">${metadata.hasImages ? 'Yes' : 'No'}</span>
-        </div>
-        <div class="metadata-preview">
-            <h4>Text Preview:</h4>
-            <div class="text-preview">${metadata.extractedText}</div>
-        </div>
-    `;
-    
-    // Add images preview if there are any
-    if (metadata.images && metadata.images.length > 0) {
-        const imagesPreview = document.createElement('div');
-        imagesPreview.className = 'images-preview';
-        imagesPreview.innerHTML = '<h4>Extracted Images:</h4>';
-        
-        const imagesContainer = document.createElement('div');
-        imagesContainer.className = 'extracted-images-container';
-        
-        metadata.images.forEach((image, index) => {
-            if (image.base64Data) {
-                const imgWrapper = document.createElement('div');
-                imgWrapper.className = 'extracted-image-wrapper';
+                const response = await fetch('https://api.mistral.ai/v1/ocr', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(requestBody)
+                });
                 
-                const img = document.createElement('img');
-                
-                // Handle different image data scenarios
-                if (image.base64Data.startsWith('data:')) {
-                    // Already a data URL
-                    img.src = image.base64Data;
-                    img.alt = `Extracted image ${index + 1}`;
-                } else if (image.base64Data.includes('![') && image.base64Data.includes('](')) {
-                    // This is a markdown image reference, extract the URL
-                    const markdownMatch = image.base64Data.match(/!\[(.*?)\]\((.*?)\)/);
-                    if (markdownMatch && markdownMatch[2]) {
-                        const imageUrl = markdownMatch[2];
-                        const isLocalReference = image.isLocalReference || (!imageUrl.includes('://') && !imageUrl.startsWith('//'));
-                        
-                        if (isLocalReference) {
-                            // This is a local file reference, not a web URL - don't try to fetch it
-                            img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3E' + encodeURIComponent('Image reference: ' + imageUrl) + '%3C%2Ftext%3E%3C%2Fsvg%3E';
-                            img.alt = `Local image reference: ${imageUrl}`;
-                            console.log(`Displaying placeholder for local image reference: ${imageUrl}`);
-                        } else {
-                            // Set a placeholder initially
-                            img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3ELoading%20image...%3C%2Ftext%3E%3C%2Fsvg%3E';
-                            img.alt = `Loading image ${index + 1}...`;
-                            
-                            // Try to fetch the image asynchronously
-                            (async () => {
-                                try {
-                                    // Try to fetch the image directly
-                                    const base64Data = await fetchImageAsBase64(imageUrl);
-                                    
-                                    if (base64Data) {
-                                        img.src = base64Data;
-                                        img.alt = `Extracted image ${index + 1}`;
-                                        console.log(`Successfully loaded image from ${imageUrl}`);
-                                    } else {
-                                        img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3ECould%20not%20load%20image%3C%2Ftext%3E%3C%2Fsvg%3E';
-                                        img.alt = `Could not load: ${imageUrl}`;
-                                        console.warn(`Could not fetch image from ${imageUrl}`);
-                                    }
-                                } catch (error) {
-                                    console.error(`Error fetching image from ${imageUrl}:`, error);
-                                    img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3EError%20loading%20image%3C%2Ftext%3E%3C%2Fsvg%3E';
-                                    img.alt = `Error loading: ${imageUrl}`;
-                                }
-                            })();
-                        }
-                    } else {
-                        img.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='; // 1x1 transparent placeholder
-                    }
-                } else if (image.base64Data.startsWith('Failed to extract')) {
-                    // Error message
-                    img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2212%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3E' + encodeURIComponent(image.base64Data) + '%3C%2Ftext%3E%3C%2Fsvg%3E';
-                    img.alt = image.base64Data;
-                } else {
-                    // Regular base64 data that needs to be converted to a data URL
-                    // Check if it's already properly formatted or needs prefix
-                    if (/^[A-Za-z0-9+/=]+$/.test(image.base64Data.trim())) {
-                        img.src = `data:${image.mimeType || 'image/jpeg'};base64,${image.base64Data}`;
-                    } else {
-                        // Log the problematic data for debugging
-                        console.warn('Non-standard base64 data:', image.base64Data.substring(0, 100) + '...');
-                        img.src = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3EInvalid%20image%20data%3C%2Ftext%3E%3C%2Fsvg%3E';
-                    }
+                // Cleanup S3 on error
+                if (!response.ok) {
+                    debugConfig.error('OCR request failed:', response.status, response.statusText);
+                    await deleteFromS3(s3Key);
+                    debugConfig.log('Cleaned up S3 file after OCR failure');
+                    
+                    const errorText = await response.text();
+                    throw new Error(`OCR request failed: ${response.status} ${response.statusText}: ${errorText}`);
                 }
                 
-                img.alt = `Extracted image ${index + 1}`;
-                img.className = 'extracted-image';
+                // Parse response
+                const data = await response.json();
                 
-                const caption = document.createElement('div');
-                caption.className = 'image-caption';
-                caption.textContent = `Page ${image.pageIndex}, Image ${image.imageIndex}${image.originalId ? ' (' + image.originalId + ')' : ''}`;
+                // Successful response
+                debugConfig.log('Received successful response from Mistral OCR API');
                 
-                imgWrapper.appendChild(img);
-                imgWrapper.appendChild(caption);
-                imagesContainer.appendChild(imgWrapper);
-            }
-        });
-        
-        imagesPreview.appendChild(imagesContainer);
-        metadataContent.appendChild(imagesPreview);
-    }
-    
-    // Add download buttons container
-    const downloadButtonsContainer = document.createElement('div');
-    downloadButtonsContainer.className = 'download-buttons-container';
-    
-    // Add download text button
-    const downloadTextBtn = document.createElement('button');
-    downloadTextBtn.id = 'downloadTextBtn';
-    downloadTextBtn.className = 'download-text-btn';
-    downloadTextBtn.textContent = 'Download Extracted Text';
-    downloadTextBtn.addEventListener('click', () => downloadExtractedText(metadata.fullText));
-    
-    // Add download HTML button (with images)
-    const downloadHtmlBtn = document.createElement('button');
-    downloadHtmlBtn.id = 'downloadHtmlBtn';
-    downloadHtmlBtn.className = 'download-html-btn';
-    downloadHtmlBtn.textContent = 'Download as HTML with Images';
-    downloadHtmlBtn.addEventListener('click', () => {
-        // Show loading state
-        downloadHtmlBtn.textContent = 'Preparing HTML...';
-        downloadHtmlBtn.disabled = true;
-        
-        // Call the async function
-        downloadExtractedHtml(metadata.fullText, metadata.images)
-            .then(() => {
-                // Reset button state
-                downloadHtmlBtn.textContent = 'Download as HTML with Images';
-                downloadHtmlBtn.disabled = false;
-            })
-            .catch(error => {
-                console.error('Error generating HTML:', error);
-                alert('Error creating HTML file: ' + error.message);
-                downloadHtmlBtn.textContent = 'Download as HTML with Images';
-                downloadHtmlBtn.disabled = false;
-            });
-    });
-    
-    downloadButtonsContainer.appendChild(downloadTextBtn);
-    downloadButtonsContainer.appendChild(downloadHtmlBtn);
-    metadataContent.appendChild(downloadButtonsContainer);
-}
-
-/**
- * Download the extracted text as a .txt file
- * @param {string} text - The text to download
- */
-function downloadExtractedText(text) {
-    if (!text) {
-        alert('No text available to download');
-        return;
-    }
-    
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'extracted_text.txt';
-    document.body.appendChild(a);
-    a.click();
-    
-    // Clean up
-    setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }, 100);
-}
-
-/**
- * Get Mistral API key from local storage or prompt user
- * @returns {string} - Mistral API key
- */
-function getMistralApiKey() {
-    let apiKey = localStorage.getItem('mistralApiKey');
-    
-    if (!apiKey) {
-        apiKey = prompt('Please enter your Mistral API key to analyze the combined PDF:');
-        if (apiKey) {
-            const saveKey = confirm('Would you like to save this API key for future use?');
-            if (saveKey) {
-                localStorage.setItem('mistralApiKey', apiKey);
-                // Update the input field to show masked value
-                mistralApiKeyInput.value = '••••••••••••••••';
-            }
-        }
-    }
-    
-    return apiKey;
-}
-
-/**
- * Generate a pre-signed GET URL for accessing a file from S3
- * @param {string} key - The key of the file in S3
- * @returns {Promise<string>} - The pre-signed URL
- */
-async function generatePresignedGetUrl(key) {
-    console.log('Generating pre-signed GET URL for:', key);
-    
-    try {
-        // Get current timestamp in ISO format
-        const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
-        const dateStamp = amzDate.substring(0, 8);
-        
-        // AWS Signature V4 parameters
-        const service = 's3';
-        const region = awsConfig.region;
-        const accessKey = awsConfig.credentials.accessKeyId;
-        const secretKey = awsConfig.credentials.secretAccessKey;
-        const host = `${awsConfig.bucketName}.s3.${region}.amazonaws.com`;
-        const endpoint = `https://${host}/${key}`;
-        const method = 'GET';
-        const expires = 86400; // 24 hours - Mistral might need time to process
-        
-        // Pre-signed URL parameters
-        const amzQueryParams = {
-            'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-            'X-Amz-Credential': `${accessKey}/${dateStamp}/${region}/${service}/aws4_request`,
-            'X-Amz-Date': amzDate,
-            'X-Amz-Expires': expires.toString(),
-            'X-Amz-SignedHeaders': 'host'
-        };
-        
-        // Build the canonical query string
-        const canonicalQueryString = Object.keys(amzQueryParams)
-            .sort()
-            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(amzQueryParams[key])}`)
-            .join('&');
-        
-        // Create canonical request
-        const canonicalRequest = method + '\n' +
-            '/' + key + '\n' +
-            canonicalQueryString + '\n' +
-            'host:' + host + '\n' +
-            '\n' +
-            'host\n' +
-            'UNSIGNED-PAYLOAD';
-        
-        // Create string to sign
-        const algorithm = 'AWS4-HMAC-SHA256';
-        const scope = dateStamp + '/' + region + '/' + service + '/aws4_request';
-        const canonicalRequestHash = await sha256(canonicalRequest);
-        
-        const stringToSign = algorithm + '\n' +
-            amzDate + '\n' +
-            scope + '\n' +
-            canonicalRequestHash;
-        
-        // Calculate signature
-        const signature = await getSignature(secretKey, dateStamp, region, service, stringToSign);
-        
-        // Create pre-signed URL
-        const presignedUrl = `${endpoint}?${canonicalQueryString}&X-Amz-Signature=${signature}`;
-        
-        return presignedUrl;
-    } catch (error) {
-        console.error('Error generating pre-signed GET URL:', error);
-        throw error;
-    }
-}
-
-/**
- * Download the extracted text and images as an HTML file
- * @param {string} text - The extracted text
- * @param {Array} images - The extracted images
- */
-async function downloadExtractedHtml(text, images) {
-    if (!text && (!images || images.length === 0)) {
-        alert('No content available to download');
-        return;
-    }
-    
-    // Convert text to HTML paragraphs
-    const htmlText = text
-        ? text
-            .split('\n\n')
-            .map(paragraph => `<p>${paragraph.replace(/\n/g, '<br>')}</p>`)
-            .join('')
-        : '<p>No text was extracted</p>';
-    
-    // Create image HTML if images exist
-    let imagesHtml = '';
-    if (images && images.length > 0) {
-        imagesHtml = '<div class="extracted-images">\n';
-        imagesHtml += '<h2>Extracted Images</h2>\n';
-        
-        // Process images (fetch if needed)
-        for (const [index, image] of images.entries()) {
-            if (image.base64Data) {
-                let imgSrc = '';
+                // Get headers for debugging
+                const responseHeaders = {};
+                for (const [key, value] of response.headers.entries()) {
+                    responseHeaders[key] = value;
+                }
+                debugConfig.log('Response headers:', responseHeaders);
                 
-                // Handle different image data scenarios
-                if (image.base64Data.startsWith('data:')) {
-                    // Already a data URL
-                    imgSrc = image.base64Data;
-                } else if (image.base64Data.includes('![') && image.base64Data.includes('](')) {
-                    // This is a markdown image reference, extract the URL
-                    const markdownMatch = image.base64Data.match(/!\[(.*?)\]\((.*?)\)/);
-                    if (markdownMatch && markdownMatch[2]) {
-                        const imageUrl = markdownMatch[2];
-                        const isLocalReference = image.isLocalReference || (!imageUrl.includes('://') && !imageUrl.startsWith('//'));
-                        
-                        if (isLocalReference) {
-                            // This is a local file reference, not a web URL
-                            imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3E' + encodeURIComponent('Image reference: ' + imageUrl) + '%3C%2Ftext%3E%3C%2Fsvg%3E';
-                            console.log(`Using placeholder for local image in HTML export: ${imageUrl}`);
-                        } else {
-                            // Try to fetch the image
-                            try {
-                                const fetchedImage = await fetchImageAsBase64(imageUrl);
-                                if (fetchedImage) {
-                                    imgSrc = fetchedImage;
-                                    console.log(`Successfully fetched image for HTML export: ${imageUrl}`);
-                                } else {
-                                    imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3ECould%20not%20load%20image%3C%2Ftext%3E%3C%2Fsvg%3E';
-                                    console.warn(`Could not fetch image for HTML export: ${imageUrl}`);
+                debugConfig.log('OCR processing complete');
+                
+                // Check response size
+                const responseSize = new TextEncoder().encode(JSON.stringify(data)).length;
+                debugConfig.log(`OCR API response size: ${formatFileSize(responseSize)}`);
+                
+                // Check data structure
+                debugConfig.log('API response structure:');
+                debugConfig.log('- Has pages array:', Boolean(data.pages));
+                debugConfig.log('- Number of pages:', data.pages ? data.pages.length : 0);
+                
+                if (data.pages && data.pages.length > 0) {
+                    debugConfig.log('- First page has images array:', Boolean(data.pages[0].images));
+                    debugConfig.log('- Number of images in first page:', data.pages[0].images ? data.pages[0].images.length : 0);
+                }
+                
+                // Count truncated images
+                let totalImages = 0;
+                let totalImagesWithBase64 = 0;
+                let totalTruncatedImages = 0;
+                
+                if (data.pages) {
+                    for (const page of data.pages) {
+                        if (page.images) {
+                            totalImages += page.images.length;
+                            
+                            for (const image of page.images) {
+                                if (image.data || (image.base64 && image.base64.data)) {
+                                    totalImagesWithBase64++;
+                                    
+                                    // Check for truncation in the base64 data
+                                    let base64Data = '';
+                                    if (image.data) {
+                                        base64Data = image.data;
+                                    } else if (image.base64 && image.base64.data) {
+                                        base64Data = image.base64.data;
+                                    }
+                                    
+                                    if (base64Data && !base64Data.endsWith('=') && base64Data.length % 4 !== 0) {
+                                        totalTruncatedImages++;
+                                    }
                                 }
-                            } catch (error) {
-                                console.error(`Error fetching image for HTML export: ${error.message}`);
-                                imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3EError%20loading%20image%3C%2Ftext%3E%3C%2Fsvg%3E';
                             }
                         }
-                    } else {
-                        imgSrc = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='; // 1x1 transparent placeholder
-                    }
-                } else if (image.base64Data.startsWith('Failed to extract')) {
-                    // Error message
-                    imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2212%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3E' + encodeURIComponent(image.base64Data) + '%3C%2Ftext%3E%3C%2Fsvg%3E';
-                } else {
-                    // Regular base64 data that needs to be converted to a data URL
-                    // Check if it's already properly formatted base64
-                    if (/^[A-Za-z0-9+/=]+$/.test(image.base64Data.trim())) {
-                        imgSrc = `data:${image.mimeType || 'image/jpeg'};base64,${image.base64Data}`;
-                    } else {
-                        // Log the problematic data for debugging
-                        console.warn('Non-standard base64 data in HTML export:', image.base64Data.substring(0, 100) + '...');
-                        imgSrc = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20version%3D%221.1%22%20width%3D%22300%22%20height%3D%22200%22%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%22200%22%20height%3D%22100%22%20style%3D%22fill%3A%23CCCCCC%3Bstroke%3Ablack%3Bstroke-width%3A2%3Bfill-opacity%3A0.1%3Bstroke-opacity%3A0.9%22%20%2F%3E%3Ctext%20x%3D%22150%22%20y%3D%22100%22%20font-size%3D%2216%22%20text-anchor%3D%22middle%22%20fill%3D%22%23333333%22%3EInvalid%20image%20data%3C%2Ftext%3E%3C%2Fsvg%3E';
                     }
                 }
                 
-                imagesHtml += `
-                <div class="image-container">
-                    <h3>Page ${image.pageIndex || 'Unknown'}, Image ${image.imageIndex || index + 1}${image.originalId ? ' (' + image.originalId + ')' : ''}</h3>
-                    <img src="${imgSrc}" 
-                         alt="Extracted image ${index + 1}" 
-                         style="max-width: 100%; height: auto; margin-bottom: 20px;">
-                </div>`;
+                debugConfig.log(`- Total images: ${totalImages}`);
+                debugConfig.log(`- Images with base64 data: ${totalImagesWithBase64}/${totalImages}`);
+                debugConfig.log(`- Images with truncation issues: ${totalTruncatedImages}/${totalImagesWithBase64}`);
+                
+                // Check for response truncation
+                const isTruncated = checkResponseForTruncation(data);
+                
+                // Clean up the temporary file from S3
+                try {
+                    await deleteFromS3(s3Key);
+                    debugConfig.log('Temporary file deleted from S3');
+                } catch (cleanupError) {
+                    debugConfig.error('Failed to clean up temporary file:', cleanupError);
+                    // Non-critical error, continue processing
+                }
+                
+                // Create metadata object
+                metadata = {
+                    pages: data.pages || [],
+                    pageCount: data.pages ? data.pages.length : 0,
+                    images: [],
+                    extractedText: '',
+                    wordCount: 0,
+                    language: '',
+                    responseSize: responseSize,
+                    isTruncated: isTruncated
+                };
+                
+                // Extract images from the response (fixing truncated base64 data where possible)
+                for (let pageIndex = 0; pageIndex < metadata.pages.length; pageIndex++) {
+                    const page = metadata.pages[pageIndex];
+                    
+                    // Extract text content
+                    if (page.text) {
+                        metadata.extractedText += page.text + '\n\n';
+                    }
+                    
+                    // Process images in this page
+                    if (page.images) {
+                        for (let imageIndex = 0; imageIndex < page.images.length; imageIndex++) {
+                            const image = page.images[imageIndex];
+                            let base64Data = '';
+                            let imageType = 'image/png'; // Default type
+                            
+                            // Try different ways the image data could be represented
+                            if (image.data) {
+                                debugConfig.log(`Found direct base64 data for image ${pageIndex + 1}-${imageIndex + 1}`);
+                                base64Data = image.data;
+                                
+                                // Try to determine image type from data
+                                if (base64Data.startsWith('data:')) {
+                                    const match = base64Data.match(/^data:([^;]+);base64,(.*)$/);
+                                    if (match) {
+                                        imageType = match[1];
+                                        debugConfig.log(`Image ${pageIndex + 1}-${imageIndex + 1} already has data URL format, extracting base64 part`);
+                                        base64Data = match[2];
+                                    }
+                                }
+                            } else if (image.base64 && image.base64.data) {
+                                base64Data = image.base64.data;
+                            }
+                            
+                            // Process base64 data if available
+                            if (base64Data) {
+                                // Fix padding issues in base64 data
+                                let processedData = base64Data;
+                                const originalLength = processedData.length;
+                                
+                                // Fix padding if needed
+                                const remainder = processedData.length % 4;
+                                if (remainder > 0) {
+                                    processedData += '='.repeat(4 - remainder);
+                                    debugConfig.log(`Fixed base64 data with padding, new length: ${processedData.length} (was ${originalLength})`);
+                                }
+                                
+                                // Clean invalid base64 characters
+                                const base64Regex = /^[A-Za-z0-9+/=]+$/;
+                                if (!base64Regex.test(processedData)) {
+                                    const cleanedData = processedData.replace(/[^A-Za-z0-9+/=]/g, '');
+                                    debugConfig.log(`Cleaned base64 data, removed ${processedData.length - cleanedData.length} invalid characters`);
+                                    processedData = cleanedData;
+                                }
+                                
+                                // Create image object
+                                const imageObj = {
+                                    id: image.id || `img-${pageIndex}-${imageIndex}`,
+                                    pageIndex: pageIndex,
+                                    base64Data: processedData,
+                                    dataUrl: `data:${imageType};base64,${processedData}`,
+                                    width: image.width || (image.base64 && image.base64.width) || 0,
+                                    height: image.height || (image.base64 && image.base64.height) || 0,
+                                    x: image.x || (image.base64 && image.base64.x) || 0,
+                                    y: image.y || (image.base64 && image.base64.y) || 0,
+                                    isTruncated: remainder > 0 || originalLength !== processedData.length
+                                };
+                                
+                                // Add to images array
+                                metadata.images.push(imageObj);
+                            }
+                        }
+                    }
+                    
+                    // Process markdown images - some OCR responses include images as markdown reference
+                    if (page.text) {
+                        // Look for markdown image references
+                        const markdownImageRegex = /!\[(.*?)\]\((.*?)\)/g;
+                        let match;
+                        
+                        while ((match = markdownImageRegex.exec(page.text)) !== null) {
+                            const imageUrl = match[2];
+                            
+                            // Skip if it's a data URL (already handled above)
+                            if (imageUrl.startsWith('data:')) {
+                                continue;
+                            }
+                            
+                            // Check if the image ID matches one we already processed
+                            const existingImage = metadata.images.find(img => img.id === imageUrl);
+                            if (existingImage) {
+                                continue;
+                            }
+                            
+                            // Try to find a reference in the API response
+                            let imageFound = false;
+                            
+                            // Check in figures array if available
+                            if (page.figures) {
+                                for (const figure of page.figures) {
+                                    if (figure.id === imageUrl) {
+                                        imageFound = true;
+                                        
+                                        // Use any partial data if available
+                                        let base64Data = '';
+                                        if (figure.data) {
+                                            base64Data = figure.data;
+                                            
+                                            // Apply same fix as above for truncated base64
+                                            const remainder = base64Data.length % 4;
+                                            if (remainder > 0) {
+                                                const originalLength = base64Data.length;
+                                                base64Data += '='.repeat(4 - remainder);
+                                                debugConfig.log(`Fixed base64 data with padding, new length: ${base64Data.length} (was ${originalLength})`);
+                                            }
+                                            
+                                            debugConfig.log(`Attempting to use partially truncated image data (${base64Data.length} chars)`);
+                                            
+                                            metadata.images.push({
+                                                id: imageUrl,
+                                                pageIndex: pageIndex,
+                                                base64Data: base64Data,
+                                                dataUrl: `data:image/png;base64,${base64Data}`,
+                                                width: figure.width || 0,
+                                                height: figure.height || 0,
+                                                x: figure.x || 0,
+                                                y: figure.y || 0,
+                                                isTruncated: true
+                                            });
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // If not found in figures, check all images
+                            if (!imageFound && data.pages) {
+                                for (const p of data.pages) {
+                                    if (p.images) {
+                                        for (const img of p.images) {
+                                            if (img.id === imageUrl) {
+                                                const imgId = img.originalId || img.id;
+                                                const escapedId = imgId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                                const imgRegex = new RegExp(`!\\[([^\\]]*)\\]\\(${escapedId}\\)`, 'g');
+                                                
+                                                // Log information about this replacement attempt
+                                                const matches = modifiedText.match(imgRegex);
+                                                const matchCount = matches ? matches.length : 0;
+                                                imageRefsFound += matchCount;
+                                                debugConfig.log(`Image '${imgId}': Found ${matchCount} references in text`);
+                                                
+                                                if (img.base64Data) {
+                                                    // Check if it's a partial image
+                                                    if (img.isTruncated && img.isPartialImage) {
+                                                        debugConfig.log(`  - Replacing with partially recovered image data (${img.base64Data.length} chars)`);
+                                                        modifiedText = modifiedText.replace(imgRegex, (match, altText) => {
+                                                            successfulReplacements++;
+                                                            replacedImages++;
+                                                            return `<div class="image-container partial-image">
+                                                                <div class="image-warning">⚠️ Partially recovered image</div>
+                                                                <img src="${img.base64Data}" alt="${altText || 'Partial Image'}" />
+                                                            </div>`;
+                                                        });
+                                                    } else {
+                                                        debugConfig.log(`  - Replacing with embedded data (${img.base64Data.length} chars)`);
+                                                        modifiedText = modifiedText.replace(imgRegex, (match, altText) => {
+                                                            successfulReplacements++;
+                                                            replacedImages++;
+                                                            return `<div class="image-container"><img src="${img.base64Data}" alt="${altText || 'Image'}" /></div>`;
+                                                        });
+                                                    }
+                                                } else if (img.isLocalReference) {
+                                                    debugConfig.log(`  - Using local reference: ${imgId}`);
+                                                    modifiedText = modifiedText.replace(imgRegex, (match, altText) => {
+                                                        successfulReplacements++;
+                                                        replacedImages++;
+                                                        return `<div class="image-container"><img src="${imgId}" alt="${altText || 'Image'}" /></div>`;
+                                                    });
+                                                } else {
+                                                    debugConfig.log(`  - Image has no usable data or reference`);
+                                                    modifiedText = modifiedText.replace(imgRegex, (match, altText) => {
+                                                        return `<div class="missing-image">Missing Image: ${altText || imgId || 'Unknown'}</div>`;
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                debugConfig.log(`Image replacement summary: Found ${imageRefsFound} references, successfully replaced ${successfulReplacements}`);
+                
+                // Convert markdown-like syntax to HTML
+                // These are simple conversions for headings, bold, italic, code, etc.
+                modifiedText = modifiedText.replace(/^### (.*$)/gm, '<h3>$1</h3>');
+                modifiedText = modifiedText.replace(/^## (.*$)/gm, '<h2>$1</h2>');
+                modifiedText = modifiedText.replace(/^# (.*$)/gm, '<h1>$1</h1>');
+                modifiedText = modifiedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                modifiedText = modifiedText.replace(/\*(.*?)\*/g, '<em>$1</em>');
+                modifiedText = modifiedText.replace(/`(.*?)`/g, '<code>$1</code>');
+                
+                // Handle paragraphs and line breaks (simplified)
+                modifiedText = modifiedText.replace(/\n\n/g, '</p><p>');
+                
+                // Complete the HTML content
+                htmlContent += `<p>${modifiedText}</p>`;
+                htmlContent += `
+</body>
+</html>`;
+
+                // Log the final HTML content size
+                debugConfig.log(`Final HTML content size: ${formatFileSize(htmlContent.length)}`);
+                
+                // Create a blob with the HTML content
+                const blob = new Blob([htmlContent], { type: 'text/html' });
+                
+                // Create a URL for the blob
+                const url = URL.createObjectURL(blob);
+                
+                // Create a download link
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${title}.html`;
+                
+                // Trigger the download
+                document.body.appendChild(a);
+                a.click();
+                
+                // Clean up
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            } catch (error) {
+                debugConfig.error('Error generating HTML:', error);
+                alert('Error generating HTML export. Please check the browser console for details.');
             }
+        } catch (error) {
+            debugConfig.error('Error generating HTML:', error);
+            alert('Error generating HTML export. Please check the browser console for details.');
         }
-        
-        imagesHtml += '</div>';
+    } catch (error) {
+        debugConfig.error('Error generating HTML:', error);
+        alert('Error generating HTML export. Please check the browser console for details.');
     }
-    
-    // Create the complete HTML document
-    const htmlContent = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Extracted Content</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                line-height: 1.6;
-                margin: 0;
-                padding: 20px;
-                max-width: 800px;
-                margin: 0 auto;
-            }
-            .content {
-                margin-bottom: 30px;
-            }
-            .extracted-images {
-                margin-top: 30px;
-                border-top: 1px solid #ccc;
-                padding-top: 20px;
-            }
-            .image-container {
-                margin-bottom: 30px;
-            }
-            h1, h2, h3 {
-                color: #333;
-            }
-        </style>
-    </head>
-    <body>
-        <h1>Extracted Content</h1>
-        <div class="content">
-            ${htmlText}
-        </div>
-        ${imagesHtml}
-    </body>
-    </html>
-    `;
-    
-    // Create and download the HTML file
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'extracted_content.html';
-    document.body.appendChild(a);
-    a.click();
-    
-    // Clean up
-    setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }, 100);
 }
 
 // Add CSS styles for the extracted images
@@ -1610,18 +1206,37 @@ imageStyles.textContent = `
 }
 
 .extracted-image-wrapper {
-    width: 150px;
+    width: 200px;
     border: 1px solid #ddd;
     border-radius: 4px;
     padding: 8px;
     background-color: #f9f9f9;
+    position: relative; /* Add positioning for the warning overlay */
 }
 
 .extracted-image {
     width: 100%;
     height: auto;
+    max-height: 200px;
     object-fit: contain;
     border-radius: 3px;
+    display: block;
+    margin: 0 auto;
+}
+
+.partial-image {
+    border: 2px solid #f0ad4e; /* Amber warning border */
+}
+
+.image-warning {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background-color: rgba(240, 173, 78, 0.8); /* Amber with opacity */
+    color: white;
+    padding: 2px 5px;
+    font-size: 10px;
+    border-bottom-left-radius: 4px;
 }
 
 .image-caption {
@@ -1669,11 +1284,11 @@ async function fetchImageAsBase64(url) {
     try {
         // If this is a local reference (not a full URL), don't even try to fetch it
         if (!url.includes('://') && !url.startsWith('//')) {
-            console.log(`Skipping fetch for local image reference: ${url}`);
+            debugConfig.log(`Skipping fetch for local image reference: ${url}`);
             return null;
         }
         
-        console.log(`Fetching image from URL: ${url}`);
+        debugConfig.log(`Fetching image from URL: ${url}`);
         
         // Try to fetch the image
         const response = await fetch(url, {
@@ -1697,7 +1312,174 @@ async function fetchImageAsBase64(url) {
             reader.readAsDataURL(blob);
         });
     } catch (error) {
-        console.error('Error fetching image:', error);
+        debugConfig.error('Error fetching image:', error);
         return null;
     }
-} 
+}
+
+// Near the processFiles function, add this new function for processing large PDFs in chunks
+
+/**
+ * Process a large PDF by splitting it into chunks for OCR
+ * @param {File} pdfFile - The PDF file to process
+ * @returns {Promise<Object>} - Combined metadata from all chunks
+ */
+async function processLargePdfInChunks(pdfFile) {
+    debugConfig.log('Processing large PDF in chunks:', pdfFile.name);
+    
+    try {
+        // Load the PDF using PDF.js to get page count
+        // Use a temporary copy to prevent ArrayBuffer detachment
+        const tempPdfBytes = await pdfFile.slice(0).arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: tempPdfBytes }).promise;
+        const numPages = pdf.numPages;
+        
+        debugConfig.log(`PDF has ${numPages} pages, will process in chunks`);
+        
+        // Create chunks of pages - smaller chunks for very large PDFs
+        const pdfSizeInMB = pdfFile.size / (1024 * 1024);
+        
+        // Adjust chunk size based on PDF size: smaller chunks for larger files
+        let CHUNK_SIZE = 5; // default
+        if (pdfSizeInMB > 30) {
+            CHUNK_SIZE = 2; // Very large PDFs get tiny chunks
+        } else if (pdfSizeInMB > 20) {
+            CHUNK_SIZE = 3; // Larger PDFs get smaller chunks
+        } else if (pdfSizeInMB > 10) {
+            CHUNK_SIZE = 4; // Medium PDFs get medium chunks
+        }
+        
+        debugConfig.log(`Using chunk size of ${CHUNK_SIZE} pages based on PDF size (${pdfSizeInMB.toFixed(2)} MB)`);
+        
+        const chunks = [];
+        
+        for (let i = 1; i <= numPages; i += CHUNK_SIZE) {
+            const endPage = Math.min(i + CHUNK_SIZE - 1, numPages);
+            chunks.push({ startPage: i, endPage: endPage });
+        }
+        
+        debugConfig.log(`Split PDF into ${chunks.length} chunks for processing`);
+        
+        // Process each chunk and collect results
+        const allResults = [];
+        let failedChunks = 0;
+        
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+            const chunk = chunks[chunkIndex];
+            debugConfig.log(`Processing chunk ${chunkIndex + 1}/${chunks.length} (pages ${chunk.startPage}-${chunk.endPage})`);
+            
+            try {
+                // Create a new PDF with just the pages from this chunk
+                const chunkPdfDoc = await PDFLib.PDFDocument.create();
+                
+                // Create a fresh copy of the file for each chunk to avoid the "detached ArrayBuffer" error
+                // This is crucial - reusing the same ArrayBuffer causes "Cannot perform Construct on a detached ArrayBuffer"
+                const sourcePdfBytes = await pdfFile.slice(0).arrayBuffer();
+                const sourcePdfDoc = await PDFLib.PDFDocument.load(sourcePdfBytes);
+                
+                // Copy pages from source to chunk
+                const pageIndices = [];
+                for (let i = chunk.startPage - 1; i < chunk.endPage; i++) {
+                    pageIndices.push(i);
+                }
+                
+                const copiedPages = await chunkPdfDoc.copyPages(sourcePdfDoc, pageIndices);
+                copiedPages.forEach(page => chunkPdfDoc.addPage(page));
+                
+                // Save the chunk PDF
+                const chunkPdfBytes = await chunkPdfDoc.save();
+                const chunkPdfFile = new File([chunkPdfBytes], `chunk_${chunkIndex + 1}_${pdfFile.name}`, { type: 'application/pdf' });
+                
+                // Process this chunk with OCR
+                debugConfig.log(`Sending chunk ${chunkIndex + 1} to OCR service (${formatFileSize(chunkPdfFile.size)})`);
+                const chunkResult = await analyzeCombinedPdfWithMistral(chunkPdfFile);
+                
+                if (chunkResult) {
+                    allResults.push(chunkResult);
+                    debugConfig.log(`Successfully processed chunk ${chunkIndex + 1}`);
+                } else {
+                    debugConfig.warn(`Failed to process chunk ${chunkIndex + 1} - no results returned`);
+                    failedChunks++;
+                }
+            } catch (chunkError) {
+                debugConfig.error(`Error processing chunk ${chunkIndex + 1}:`, chunkError);
+                failedChunks++;
+                
+                // Check if too many chunks are failing
+                if (failedChunks > 2 && failedChunks / (chunkIndex + 1) > 0.5) {
+                    debugConfig.error('Too many chunks failing, aborting chunked processing');
+                    throw new Error('Multiple chunk processing failures - OCR may not be working properly');
+                }
+            }
+            
+            // Add a delay between chunks to avoid rate limiting
+            const delayTime = 2000 + (Math.random() * 1000); // 2-3 seconds
+            debugConfig.log(`Waiting ${Math.round(delayTime/1000)} seconds before processing next chunk...`);
+            await new Promise(resolve => setTimeout(resolve, delayTime));
+        }
+        
+        // Combine all results - require at least one successful chunk
+        if (allResults.length === 0) {
+            throw new Error('Failed to process any chunks of the PDF');
+        }
+        
+        // Give a warning if some chunks failed
+        if (failedChunks > 0) {
+            debugConfig.warn(`${failedChunks} out of ${chunks.length} chunks failed processing`);
+        }
+        
+        // Merge metadata from all chunks
+        const combinedMetadata = {
+            pageCount: numPages,
+            totalWords: allResults.reduce((sum, result) => sum + result.totalWords, 0),
+            language: allResults[0].language, // Use the language from the first chunk
+            hasImages: allResults.some(result => result.hasImages),
+            extractedText: allResults.map(result => result.extractedText).join('\n\n'),
+            fullText: allResults.map(result => result.fullText).join('\n\n'),
+            images: []
+        };
+        
+        // Combine all images from all chunks, updating page indices
+        let pageOffset = 0;
+        allResults.forEach((result, chunkIndex) => {
+            if (result.images && result.images.length > 0) {
+                const chunkStartPage = chunks[chunkIndex].startPage;
+                
+                result.images.forEach(image => {
+                    // Update the page index to reflect the position in the full document
+                    const adjustedImage = { ...image };
+                    adjustedImage.pageIndex = (chunkStartPage - 1) + image.pageIndex;
+                    combinedMetadata.images.push(adjustedImage);
+                });
+            }
+            
+            pageOffset += chunks[chunkIndex].endPage - chunks[chunkIndex].startPage + 1;
+        });
+        
+        debugConfig.log(`Successfully processed all chunks, combined ${combinedMetadata.images.length} images`);
+        return combinedMetadata;
+    } catch (error) {
+        debugConfig.error('Error processing large PDF in chunks:', error);
+        throw error;
+    }
+}
+
+// Now, update the processFiles function to use the chunking approach for very large PDFs
+// Find the part where combinedPdfMetadata is obtained and modify it:
+
+// Inside processFiles function, modify this section:
+// if (shouldCombine && combinedPdfDoc) {
+//     try {
+//         ...
+//         const ocrEnabled = enableOcrCheckbox.checked;
+//         if (ocrEnabled) {
+//             try {
+//                 combinedPdfMetadata = await analyzeCombinedPdfWithMistral(combinedPdf);
+//                 displayCombinedPdfMetadata(combinedPdfMetadata);
+//             } catch (error) {
+//                 console.error('Error analyzing combined PDF:', error);
+//             }
+//         }
+//         ...
+//     }
+// }

@@ -1,38 +1,77 @@
-# Ultra-Compress PDF
+# Universal File Compressor
 
-A web application to compress PDF files while maintaining readability for both humans and LLMs.
+A comprehensive web application to compress and optimize multiple file types including PDFs, images, documents, text files, and more while maintaining quality and readability.
 
 ## Features
 
-- Drag and drop interface for PDF files
-- Adjustable compression settings:
-  - Image quality (affects file size)
-  - Resolution (DPI)
-- Real-time compression progress
-- Download compressed PDF files
-- Size comparison between original and compressed files
-- Side-by-side comparison viewer for original and compressed PDFs
-- Download all compressed files at once
-- Reorder PDFs via drag-and-drop
-- Combine multiple PDFs into a single document
+### Universal File Support
+- **PDF Files**: Compress with adjustable quality and DPI settings
+- **Images**: JPEG, PNG, GIF, WebP, BMP, TIFF, SVG compression and format conversion
+- **Text Files**: TXT, MD, JSON, XML, CSV optimization and GZIP compression
+- **Documents**: Office files (Word, Excel, PowerPoint) - *coming soon*
+- **Videos**: MP4, AVI, MOV compression - *coming soon*
+- **Audio**: MP3, WAV, AAC compression - *coming soon*
+
+### Core Features
+- **Intelligent File Detection**: Automatic file type recognition and appropriate compression
+- **Drag & Drop Interface**: Intuitive file handling for all supported formats
+- **Batch Processing**: Process multiple mixed file types simultaneously
+- **Smart File Organization**: Tabbed interface to organize files by type
+- **Real-time Progress**: Live compression progress for each file
+- **Advanced Options**: Simple and advanced compression settings per file type
+- **Size Comparison**: Before/after file size analysis with reduction percentages
+- **Download Management**: Individual file downloads or bulk download all compressed files
+
+### PDF-Specific Features
+- Adjustable image quality and DPI settings
+- Side-by-side comparison viewer
 - OCR analysis for combined PDFs via Mistral AI
 - AWS S3 integration for temporary file storage
+- PDF combination and reordering
+
+### Image-Specific Features
+- Format conversion (JPEG, PNG, WebP, AVIF)
+- Quality adjustment and resizing
+- Web optimization presets
+- Metadata extraction
+- Thumbnail generation
+
+### Text-Specific Features
+- JSON/XML minification and prettification
+- Comment removal and whitespace optimization
+- GZIP compression for maximum size reduction
+- Format-specific optimizations
 
 ## How It Works
 
-Ultra-Compress PDF works by:
+The Universal File Compressor uses different compression strategies based on file type:
 
-1. Reading the PDF file using PDF.js
-2. Rendering each page to a canvas
-3. Converting each page to a JPEG with adjustable quality
-4. Creating a new PDF with pdf-lib containing the compressed images
-5. Preserving the original page dimensions
+### PDF Compression
+1. Reads PDF files using PDF.js
+2. Renders each page to a canvas at specified DPI
+3. Converts pages to JPEG with adjustable quality
+4. Creates a new PDF with pdf-lib containing compressed images
+5. Preserves original page dimensions and structure
 
-For OCR functionality:
-1. Combined PDF is securely uploaded to AWS S3 using pre-signed URLs
-2. Mistral AI's OCR service processes the document
-3. Text is extracted from all pages, including images and scanned content
-4. The file is automatically deleted from S3 after processing
+### Image Compression
+1. Detects image format and metadata
+2. Uses browser-image-compression for optimal results
+3. Falls back to canvas-based compression if needed
+4. Supports format conversion and resizing
+5. Maintains aspect ratios and quality settings
+
+### Text Compression
+1. Analyzes file type (JSON, XML, CSV, etc.)
+2. Applies format-specific optimizations
+3. Removes comments, whitespace, and empty lines
+4. Uses GZIP compression for maximum reduction
+5. Preserves data integrity and readability
+
+### OCR Functionality (PDF)
+1. Combined PDFs are securely uploaded to AWS S3
+2. Mistral AI's OCR service processes documents
+3. Text is extracted from all content including images
+4. Files are automatically deleted from S3 after processing
 
 ## Setup
 
@@ -61,30 +100,56 @@ For OCR functionality:
    AWS_BUCKET_NAME=your-bucket-name
    ```
 
-4. Start the server
+4. Start the development server
    ```bash
-   npm start
+   npm run dev
    ```
 
 5. Open http://localhost:3000 in your browser
 
+### Production Build
+
+To build for production:
+```bash
+npm run build
+npm start
+```
+
 ## Usage
 
-1. Open the application in a web browser
-2. Drag and drop PDF files onto the drop area or click "Select Files" to choose files
-3. Arrange the files in your desired order using drag and drop
-4. Adjust compression settings as needed:
-   - Lower image quality for smaller file size
-   - Lower DPI for further size reduction
-5. Optionally check "Combine all PDFs into a single file" if you want a merged document
-6. For OCR analysis of combined PDFs, enable the OCR option and enter your Mistral API key
-7. Click "Compress Files" to start the compression process
-8. Once compression is complete, you can:
-   - Download individual compressed files
-   - Compare the original and compressed versions side by side
-   - Download all compressed files at once with the "Download All" button
-   - Download the combined PDF (if you selected that option)
-   - View OCR results and download extracted text (for combined PDFs with OCR)
+### Getting Started
+1. Open the application in a web browser (http://localhost:3001 during development)
+2. Drop files onto the drag area or click "Select Files"
+3. Supported formats are automatically detected and organized by type
+
+### File Organization
+- Files are automatically grouped by type (PDF, Images, Text, etc.)
+- Use the tabs to view files by category or see all files together
+- Each file shows its type, size, and a relevant icon
+
+### Compression Options
+- **Simple Mode**: Quick compression with good default settings
+- **Advanced Mode**: Fine-tune settings for each file type:
+  - **PDF**: Adjust quality (1-100%) and DPI (72-300)
+  - **Images**: Set quality, format conversion, and resize options
+  - **Text**: Choose optimization level and specific improvements
+
+### Processing Files
+1. Select your desired compression settings
+2. Click "Compress [X] Files" to start processing
+3. Monitor real-time progress for each file
+4. View detailed results with before/after size comparisons
+
+### Download Options
+- Download individual files from the results section
+- Use "Download All" for bulk download of all compressed files
+- Failed compressions are clearly indicated with error messages
+
+### Special Features
+- **PDF OCR**: Enable in advanced settings with Mistral API key
+- **Format Conversion**: Convert images between formats (JPEG, PNG, WebP)
+- **GZIP Compression**: Maximum compression for text files
+- **Batch Processing**: Handle mixed file types in one operation
 
 ## Security Note
 
@@ -96,10 +161,11 @@ For OCR functionality:
 
 ## Dependencies
 
+- [Next.js](https://nextjs.org/) - React framework for production
+- [React](https://reactjs.org/) - Component-based UI library
 - [PDF.js](https://mozilla.github.io/pdf.js/) - For rendering PDF pages
 - [pdf-lib](https://pdf-lib.js.org/) - For creating new PDF files
 - [SortableJS](https://github.com/SortableJS/Sortable) - For drag and drop reordering
-- [Express](https://expressjs.com/) - For server-side routing and API
 - [dotenv](https://github.com/motdotla/dotenv) - For environment variable management
 
 ## Comparison Viewer
@@ -120,6 +186,17 @@ You can easily reorder your PDF files before compression:
 
 ## Notes
 
-- All processing is done client-side; no files are uploaded to a server
+- PDF compression is done client-side; no files are uploaded to a server for compression
+- For OCR functionality, files are temporarily uploaded to S3 and automatically deleted after processing
 - Large PDFs may take more time to process
-- Text quality is dependent on the selected DPI and image quality settings 
+- Text quality is dependent on the selected DPI and image quality settings
+
+## Architecture
+
+This application has been converted from a vanilla HTML/JavaScript app to a Next.js application:
+
+- **Frontend**: React components with hooks for state management
+- **Backend**: Next.js API routes for AWS configuration
+- **Styling**: Global CSS (preserved from original design)
+- **PDF Processing**: Client-side using PDF.js and pdf-lib
+- **OCR**: Mistral AI integration with AWS S3 for temporary storage 
