@@ -1,14 +1,14 @@
 {
   "utils/imageUtils.js -> browser-image-compression": {
-    "id": "utils/imageUtils.js -> browser-image-compression",
+    "id": 3587,
     "files": [
-      "static/chunks/_pages-dir-browser_node_modules_browser-image-compression_dist_browser-image-compression_mjs.js"
+      "static/chunks/587.53f860cee6bcebcb.js"
     ]
   },
   "utils/textUtils.js -> pako": {
-    "id": "utils/textUtils.js -> pako",
+    "id": 278,
     "files": [
-      "static/chunks/_pages-dir-browser_node_modules_pako_dist_pako_esm_mjs.js"
+      "static/chunks/0bd2f4cc.a24b48455fde4574.js"
     ]
   }
 }
