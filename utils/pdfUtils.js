@@ -1,8 +1,16 @@
 // utils/pdfUtils.js - PDF compression and processing utilities
 
-// Initialize PDF.js worker
-if (typeof window !== 'undefined' && typeof pdfjsLib !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+// Initialize PDF.js worker when libraries are loaded
+if (typeof window !== 'undefined') {
+  // Wait for pdfjsLib to be available and then set worker
+  const checkAndSetWorker = () => {
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    } else {
+      setTimeout(checkAndSetWorker, 100);
+    }
+  };
+  checkAndSetWorker();
 }
 
 // AWS Configuration - Will be populated from server
@@ -62,9 +70,26 @@ export async function loadAwsConfig() {
 
 // Compress PDF file
 export async function compressPdf(file, quality, dpi, progressCallback) {
-  if (typeof window === 'undefined' || typeof pdfjsLib === 'undefined' || typeof PDFLib === 'undefined') {
-    throw new Error('PDF libraries not loaded');
+  // Check if we're in browser environment
+  if (typeof window === 'undefined') {
+    throw new Error('PDF compression only works in browser environment');
   }
+
+  // Wait for libraries to load
+  let retries = 0;
+  const maxRetries = 50; // Wait up to 5 seconds
+  
+  while (retries < maxRetries && (typeof window.pdfjsLib === 'undefined' || typeof window.PDFLib === 'undefined')) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    retries++;
+  }
+  
+  if (typeof window.pdfjsLib === 'undefined' || typeof window.PDFLib === 'undefined') {
+    throw new Error('PDF libraries not loaded. Please refresh the page and try again.');
+  }
+
+  const pdfjsLib = window.pdfjsLib;
+  const PDFLib = window.PDFLib;
 
   // Convert quality from percentage (1-100) to decimal (0-1)
   const imageQuality = quality / 100;

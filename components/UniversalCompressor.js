@@ -17,6 +17,7 @@ export default function UniversalCompressor() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [currentProcessingFile, setCurrentProcessingFile] = useState('');
+  const [librariesLoaded, setLibrariesLoaded] = useState(false);
   
   // Compression options for different file types
   const [pdfOptions, setPdfOptions] = useState({ quality: 50, dpi: 150 });
@@ -38,6 +39,18 @@ export default function UniversalCompressor() {
   
   const fileInputRef = useRef(null);
   const dropAreaRef = useRef(null);
+
+  // Check for PDF library loading
+  useEffect(() => {
+    const checkLibraries = () => {
+      if (typeof window !== 'undefined' && window.pdfjsLib && window.PDFLib) {
+        setLibrariesLoaded(true);
+      } else {
+        setTimeout(checkLibraries, 100);
+      }
+    };
+    checkLibraries();
+  }, []);
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -88,6 +101,13 @@ export default function UniversalCompressor() {
   const processFiles = async () => {
     if (files.length === 0) {
       alert('Please select at least one file to compress.');
+      return;
+    }
+
+    // Check if PDF files are present and libraries are loaded
+    const hasPdfFiles = files.some(file => detectFileType(file) === FILE_TYPES.PDF);
+    if (hasPdfFiles && !librariesLoaded) {
+      alert('PDF libraries are still loading. Please wait a moment and try again.');
       return;
     }
     
@@ -212,104 +232,119 @@ export default function UniversalCompressor() {
 
         {/* Image Options */}
         {getFilesByType(FILE_TYPES.IMAGE).length > 0 && (
-          <div className="file-type-options">
-            <h4>🖼️ Image Options</h4>
-            <div className="option">
-              <label>Quality: {Math.round(imageOptions.quality * 100)}%</label>
-              <input 
-                type="range" 
-                min="0.1" 
-                max="1" 
-                step="0.1"
-                value={imageOptions.quality}
-                onChange={(e) => setImageOptions(prev => ({ ...prev, quality: parseFloat(e.target.value) }))}
-              />
+          <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
+            <h4 className="text-lg font-semibold text-gray-800 mb-4">🖼️ Image Options</h4>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Quality: {Math.round(imageOptions.quality * 100)}%</label>
+                <input 
+                  type="range" 
+                  min="0.1" 
+                  max="1" 
+                  step="0.1"
+                  value={imageOptions.quality}
+                  onChange={(e) => setImageOptions(prev => ({ ...prev, quality: parseFloat(e.target.value) }))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Format:</label>
+                <select 
+                  value={imageOptions.format}
+                  onChange={(e) => setImageOptions(prev => ({ ...prev, format: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="jpeg">JPEG</option>
+                  <option value="png">PNG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+              {showAdvancedOptions && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Max Width (px):</label>
+                    <input 
+                      type="number" 
+                      placeholder="Auto"
+                      value={imageOptions.maxWidth || ''}
+                      onChange={(e) => setImageOptions(prev => ({ 
+                        ...prev, 
+                        maxWidth: e.target.value ? parseInt(e.target.value) : null 
+                      }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Max Height (px):</label>
+                    <input 
+                      type="number" 
+                      placeholder="Auto"
+                      value={imageOptions.maxHeight || ''}
+                      onChange={(e) => setImageOptions(prev => ({ 
+                        ...prev, 
+                        maxHeight: e.target.value ? parseInt(e.target.value) : null 
+                      }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </>
+              )}
             </div>
-            <div className="option">
-              <label>Format:</label>
-              <select 
-                value={imageOptions.format}
-                onChange={(e) => setImageOptions(prev => ({ ...prev, format: e.target.value }))}
-              >
-                <option value="jpeg">JPEG</option>
-                <option value="png">PNG</option>
-                <option value="webp">WebP</option>
-              </select>
-            </div>
-            {showAdvancedOptions && (
-              <>
-                <div className="option">
-                  <label>Max Width (px):</label>
-                  <input 
-                    type="number" 
-                    placeholder="Auto"
-                    value={imageOptions.maxWidth || ''}
-                    onChange={(e) => setImageOptions(prev => ({ 
-                      ...prev, 
-                      maxWidth: e.target.value ? parseInt(e.target.value) : null 
-                    }))}
-                  />
-                </div>
-                <div className="option">
-                  <label>Max Height (px):</label>
-                  <input 
-                    type="number" 
-                    placeholder="Auto"
-                    value={imageOptions.maxHeight || ''}
-                    onChange={(e) => setImageOptions(prev => ({ 
-                      ...prev, 
-                      maxHeight: e.target.value ? parseInt(e.target.value) : null 
-                    }))}
-                  />
-                </div>
-              </>
-            )}
           </div>
         )}
 
         {/* Text Options */}
         {getFilesByType(FILE_TYPES.TEXT).length > 0 && (
-          <div className="file-type-options">
-            <h4>📝 Text Options</h4>
-            <div className="option">
-              <label>Method:</label>
-              <select 
-                value={textOptions.method}
-                onChange={(e) => setTextOptions(prev => ({ ...prev, method: e.target.value }))}
-              >
-                <option value="optimize">Optimize</option>
-                <option value="minify">Minify</option>
-                <option value="gzip">GZIP</option>
-              </select>
+          <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
+            <h4 className="text-lg font-semibold text-gray-800 mb-4">📝 Text Options</h4>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Method:</label>
+                <select 
+                  value={textOptions.method}
+                  onChange={(e) => setTextOptions(prev => ({ ...prev, method: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="optimize">Optimize</option>
+                  <option value="minify">Minify</option>
+                  <option value="gzip">GZIP</option>
+                </select>
+              </div>
+              {showAdvancedOptions && (
+                <>
+                  <div className="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="removeComments"
+                      checked={textOptions.removeComments}
+                      onChange={(e) => setTextOptions(prev => ({ ...prev, removeComments: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="removeComments" className="ml-2 text-sm font-medium text-gray-700">Remove Comments</label>
+                  </div>
+                  <div className="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="removeWhitespace"
+                      checked={textOptions.removeExtraWhitespace}
+                      onChange={(e) => setTextOptions(prev => ({ ...prev, removeExtraWhitespace: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="removeWhitespace" className="ml-2 text-sm font-medium text-gray-700">Remove Extra Whitespace</label>
+                  </div>
+                  <div className="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="removeEmptyLines"
+                      checked={textOptions.removeEmptyLines}
+                      onChange={(e) => setTextOptions(prev => ({ ...prev, removeEmptyLines: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="removeEmptyLines" className="ml-2 text-sm font-medium text-gray-700">Remove Empty Lines</label>
+                  </div>
+                </>
+              )}
             </div>
-            {showAdvancedOptions && (
-              <>
-                <div className="option-checkbox">
-                  <input 
-                    type="checkbox" 
-                    checked={textOptions.removeComments}
-                    onChange={(e) => setTextOptions(prev => ({ ...prev, removeComments: e.target.checked }))}
-                  />
-                  <label>Remove Comments</label>
-                </div>
-                <div className="option-checkbox">
-                  <input 
-                    type="checkbox" 
-                    checked={textOptions.removeExtraWhitespace}
-                    onChange={(e) => setTextOptions(prev => ({ ...prev, removeExtraWhitespace: e.target.checked }))}
-                  />
-                  <label>Remove Extra Whitespace</label>
-                </div>
-                <div className="option-checkbox">
-                  <input 
-                    type="checkbox" 
-                    checked={textOptions.removeEmptyLines}
-                    onChange={(e) => setTextOptions(prev => ({ ...prev, removeEmptyLines: e.target.checked }))}
-                  />
-                  <label>Remove Empty Lines</label>
-                </div>
-              </>
-            )}
           </div>
         )}
       </div>
@@ -323,53 +358,67 @@ export default function UniversalCompressor() {
     const failedResults = processedFiles.filter(result => !result.success);
 
     return (
-      <div className="results">
-        <h3>Results ({processedFiles.length} files processed)</h3>
+      <div className="mt-8">
+        <h3 className="text-2xl font-bold text-gray-800 mb-6">Results ({processedFiles.length} files processed)</h3>
         
         {successfulResults.length > 0 && (
-          <div className="successful-results">
-            <h4>✅ Successfully Compressed ({successfulResults.length})</h4>
-            {successfulResults.map((result, index) => {
-              const fileInfo = getFileTypeInfo(result.fileType);
-              
-              return (
-                <div key={index} className="result-item">
-                  <div className="result-header">
-                    <div className="file-icon">{fileInfo?.icon || '📄'}</div>
-                    <div className="file-name">{result.original.name}</div>
-                  </div>
-                  <div className="result-details">
-                    <div className="size-comparison">
-                      <span>Original: {formatFileSize(result.original.size)}</span>
-                      <span> → </span>
-                      <span>Compressed: {formatFileSize(result.compressed.size)}</span>
-                      <span className="reduction"> ({result.reduction}% smaller)</span>
+          <div className="mb-8">
+            <h4 className="text-lg font-semibold text-green-600 mb-4 flex items-center gap-2">
+              <span className="text-xl">✅</span> Successfully Compressed ({successfulResults.length})
+            </h4>
+            <div className="space-y-4">
+              {successfulResults.map((result, index) => {
+                const fileInfo = getFileTypeInfo(result.fileType);
+                
+                return (
+                  <div key={index} className="bg-green-50 border border-green-200 rounded-lg p-6">
+                    <div className="flex items-center mb-4">
+                      <div className="text-2xl mr-3">{fileInfo?.icon || '📄'}</div>
+                      <div className="font-medium text-gray-800">{result.original.name}</div>
                     </div>
-                    <div className="actions">
-                      <button onClick={() => downloadFile(result.compressed)}>Download</button>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                      <div className="text-sm text-gray-600">
+                        <span>Original: {formatFileSize(result.original.size)}</span>
+                        <span className="mx-2 text-gray-400">→</span>
+                        <span>Compressed: {formatFileSize(result.compressed.size)}</span>
+                        <span className="ml-2 text-green-600 font-semibold">({result.reduction}% smaller)</span>
+                      </div>
+                      <button 
+                        onClick={() => downloadFile(result.compressed)}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                      >
+                        Download
+                      </button>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
 
         {failedResults.length > 0 && (
-          <div className="failed-results">
-            <h4>❌ Failed to Compress ({failedResults.length})</h4>
-            {failedResults.map((result, index) => (
-              <div key={index} className="result-item error">
-                <div className="file-name">{result.original.name}</div>
-                <div className="error-message">{result.error}</div>
-              </div>
-            ))}
+          <div className="mb-8">
+            <h4 className="text-lg font-semibold text-red-600 mb-4 flex items-center gap-2">
+              <span className="text-xl">❌</span> Failed to Compress ({failedResults.length})
+            </h4>
+            <div className="space-y-3">
+              {failedResults.map((result, index) => (
+                <div key={index} className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="font-medium text-gray-800 mb-2">{result.original.name}</div>
+                  <div className="text-sm text-red-600">{result.error}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
         {successfulResults.length > 0 && (
-          <div className="download-all-container">
-            <button onClick={() => downloadAllFiles(successfulResults.map(r => r.compressed))}>
+          <div className="text-center">
+            <button 
+              onClick={() => downloadAllFiles(successfulResults.map(r => r.compressed))}
+              className="px-8 py-4 bg-gradient-to-r from-green-500 to-blue-500 text-white rounded-xl font-bold text-lg hover:from-green-600 hover:to-blue-600 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105"
+            >
               Download All Compressed Files
             </button>
           </div>
@@ -408,6 +457,12 @@ export default function UniversalCompressor() {
         
         <div className="text-center mb-8 p-4 bg-blue-50 rounded-lg border-l-4 border-blue-500">
           <p className="text-sm text-gray-700"><strong>Supported formats:</strong> PDF, JPEG, PNG, GIF, WebP, TXT, MD, JSON, XML, CSV, and more</p>
+          {!librariesLoaded && (
+            <div className="mt-2 flex items-center justify-center gap-2 text-xs text-blue-600">
+              <div className="animate-spin w-3 h-3 border border-blue-600 border-t-transparent rounded-full"></div>
+              Loading PDF libraries...
+            </div>
+          )}
         </div>
         
         <div 

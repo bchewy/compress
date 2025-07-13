@@ -1,9 +1,9 @@
 {
-  "/_app": "pages/_app.js",
   "/": "pages/index.html",
-  "/api/aws-config": "pages/api/aws-config.js",
-  "/pdf": "pages/pdf.html",
   "/_error": "pages/_error.js",
+  "/api/aws-config": "pages/api/aws-config.js",
+  "/_app": "pages/_app.js",
+  "/pdf": "pages/pdf.html",
   "/_document": "pages/_document.js",
   "/404": "pages/404.html"
 }
