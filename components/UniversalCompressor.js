@@ -42,14 +42,46 @@ export default function UniversalCompressor() {
 
   // Check for PDF library loading
   useEffect(() => {
+    let retryCount = 0;
+    const maxRetries = 100; // 10 seconds max
+    
     const checkLibraries = () => {
-      if (typeof window !== 'undefined' && window.pdfjsLib && window.PDFLib) {
-        setLibrariesLoaded(true);
-      } else {
-        setTimeout(checkLibraries, 100);
+      if (typeof window !== 'undefined') {
+        retryCount++;
+        
+        // Debug: log what's available (but only occasionally to avoid spam)
+        if (retryCount % 10 === 1) {
+          console.log('Checking libraries (attempt', retryCount, '):', {
+            pdfjsLib: typeof window.pdfjsLib,
+            PDFLib: typeof window.PDFLib,
+            pdfLib: typeof window.pdfLib,
+            pdfjsWorker: typeof window.pdfjsWorker
+          });
+        }
+        
+        // Check for both possible variable names
+        const hasPdfJs = window.pdfjsLib || window.pdfjs;
+        const hasPdfLib = window.PDFLib || window.pdfLib;
+        
+        if (hasPdfJs && hasPdfLib) {
+          console.log('PDF libraries loaded successfully');
+          setLibrariesLoaded(true);
+          return;
+        }
+        
+        // Stop retrying after max attempts
+        if (retryCount >= maxRetries) {
+          console.warn('PDF libraries failed to load after', maxRetries, 'attempts');
+          return;
+        }
       }
+      
+      // Keep checking every 100ms
+      setTimeout(checkLibraries, 100);
     };
-    checkLibraries();
+    
+    // Start checking after a short delay
+    setTimeout(checkLibraries, 500);
   }, []);
 
   const handleDragOver = (e) => {
@@ -107,8 +139,7 @@ export default function UniversalCompressor() {
     // Check if PDF files are present and libraries are loaded
     const hasPdfFiles = files.some(file => detectFileType(file) === FILE_TYPES.PDF);
     if (hasPdfFiles && !librariesLoaded) {
-      alert('PDF libraries are still loading. Please wait a moment and try again.');
-      return;
+      console.warn('PDF libraries may not be fully loaded. Proceeding anyway...');
     }
     
     setIsProcessing(true);
@@ -436,11 +467,29 @@ export default function UniversalCompressor() {
       
       <Script 
         src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js" 
-        strategy="beforeInteractive"
+        strategy="afterInteractive"
+        onLoad={() => {
+          console.log('PDF-lib script loaded, checking window.PDFLib:', typeof window.PDFLib);
+          setLibrariesLoaded(prev => {
+            const pdfJsReady = typeof window.pdfjsLib !== 'undefined';
+            const pdfLibReady = typeof window.PDFLib !== 'undefined';
+            return pdfJsReady && pdfLibReady;
+          });
+        }}
+        onError={(e) => console.error('Failed to load PDF-lib:', e)}
       />
       <Script 
         src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js" 
-        strategy="beforeInteractive"
+        strategy="afterInteractive"
+        onLoad={() => {
+          console.log('PDF.js script loaded, checking window.pdfjsLib:', typeof window.pdfjsLib);
+          setLibrariesLoaded(prev => {
+            const pdfJsReady = typeof window.pdfjsLib !== 'undefined';
+            const pdfLibReady = typeof window.PDFLib !== 'undefined';
+            return pdfJsReady && pdfLibReady;
+          });
+        }}
+        onError={(e) => console.error('Failed to load PDF.js:', e)}
       />
 
       <div className="max-w-6xl mx-auto bg-white rounded-3xl shadow-2xl p-8">
@@ -460,7 +509,7 @@ export default function UniversalCompressor() {
           {!librariesLoaded && (
             <div className="mt-2 flex items-center justify-center gap-2 text-xs text-blue-600">
               <div className="animate-spin w-3 h-3 border border-blue-600 border-t-transparent rounded-full"></div>
-              Loading PDF libraries...
+              Loading PDF libraries... (PDF compression may be limited)
             </div>
           )}
         </div>
