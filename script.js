@@ -1,16 +1,6 @@
 // Initialize PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
-// AWS Configuration - Will be populated from server
-const awsConfig = {
-    region: '',
-    credentials: {
-        accessKeyId: '',
-        secretAccessKey: ''
-    },
-    bucketName: ''
-};
-
 // Debug configuration
 const debugConfig = {
     isDebugMode: localStorage.getItem('debugMode') === 'true' || false,
@@ -33,29 +23,10 @@ const debugConfig = {
     }
 };
 
-// Load AWS configuration from server
+// Server-side AWS credentials are intentionally not exposed to the browser.
 async function loadAwsConfig() {
-    try {
-        debugConfig.log('Loading AWS configuration from server...');
-        const response = await fetch('/api/aws-config');
-        
-        if (!response.ok) {
-            throw new Error(`Failed to load AWS config: ${response.status} ${response.statusText}`);
-        }
-        
-        const config = await response.json();
-        
-        // Update the AWS config
-        awsConfig.region = config.region;
-        awsConfig.credentials.accessKeyId = config.credentials.accessKeyId;
-        awsConfig.credentials.secretAccessKey = config.credentials.secretAccessKey;
-        awsConfig.bucketName = config.bucketName;
-        
-        debugConfig.log('AWS configuration loaded successfully');
-    } catch (error) {
-        debugConfig.error('Error loading AWS configuration:', error);
-        alert('Failed to load AWS configuration. Some features may not work properly.');
-    }
+    debugConfig.warn('AWS-backed OCR is disabled.');
+    return false;
 }
 
 // DOM elements

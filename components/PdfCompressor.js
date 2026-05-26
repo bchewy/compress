@@ -3,15 +3,11 @@ import Head from 'next/head';
 import Script from 'next/script';
 import { 
   debugConfig, 
-  loadAwsConfig, 
   compressPdf, 
   addToCombinedPdf, 
   formatFileSize, 
   downloadFile, 
-  downloadAllFiles,
-  processLargePdfInChunks,
-  analyzeCombinedPdfWithMistral,
-  getMistralApiKey 
+  downloadAllFiles
 } from '../utils/pdfUtils';
 
 export default function PdfCompressor() {
@@ -20,9 +16,7 @@ export default function PdfCompressor() {
   const [quality, setQuality] = useState(50);
   const [dpi, setDpi] = useState(150);
   const [combineFiles, setCombineFiles] = useState(false);
-  const [enableOcr, setEnableOcr] = useState(true);
   const [debugMode, setDebugMode] = useState(false);
-  const [mistralApiKey, setMistralApiKey] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [combinedPdf, setCombinedPdf] = useState(null);
   const [combinedPdfMetadata, setCombinedPdfMetadata] = useState(null);
@@ -33,22 +27,11 @@ export default function PdfCompressor() {
   useEffect(() => {
     // Load saved preferences
     const savedDebugMode = localStorage.getItem('debugMode') === 'true';
-    const savedEnableOcr = localStorage.getItem('enableOcr') !== 'false';
-    const savedApiKey = localStorage.getItem('mistralApiKey');
     
     setDebugMode(savedDebugMode);
-    setEnableOcr(savedEnableOcr);
-    if (savedApiKey) {
-      setMistralApiKey('••••••••••••••••');
-    }
 
     // Update debug config
     debugConfig.isDebugMode = savedDebugMode;
-
-    // Load AWS config
-    loadAwsConfig().catch(error => {
-      console.error('Failed to load AWS configuration:', error);
-    });
   }, []);
 
   const handleDragOver = (e) => {
@@ -144,27 +127,6 @@ export default function PdfCompressor() {
         const combinedPdfBlob = new Blob([combinedPdfBytes], { type: 'application/pdf' });
         const combinedPdfFile = new File([combinedPdfBlob], 'combined.pdf', { type: 'application/pdf' });
         setCombinedPdf(combinedPdfFile);
-        
-        // Process OCR for combined PDF if enabled
-        if (enableOcr) {
-          try {
-            const isLargePdf = combinedPdfFile.size > 10 * 1024 * 1024; // 10MB threshold
-            
-            let metadata;
-            if (isLargePdf) {
-              debugConfig.log('PDF is large, using chunking approach for OCR');
-              metadata = await processLargePdfInChunks(combinedPdfFile);
-            } else {
-              debugConfig.log('Processing PDF with standard OCR approach');
-              metadata = await analyzeCombinedPdfWithMistral(combinedPdfFile);
-            }
-            
-            setCombinedPdfMetadata(metadata);
-          } catch (error) {
-            debugConfig.error('Error during OCR processing:', error);
-            alert('Error during OCR processing: ' + error.message);
-          }
-        }
       }
     } catch (error) {
       console.error('Error processing files:', error);
@@ -174,34 +136,11 @@ export default function PdfCompressor() {
     setIsProcessing(false);
   };
 
-  const saveApiKey = () => {
-    const apiKey = mistralApiKey.trim();
-    if (apiKey && apiKey !== '••••••••••••••••') {
-      localStorage.setItem('mistralApiKey', apiKey);
-      setMistralApiKey('••••••••••••••••');
-      alert('API key saved successfully!');
-    } else {
-      alert('Please enter an API key.');
-    }
-  };
-
-  const clearApiKey = () => {
-    localStorage.removeItem('mistralApiKey');
-    setMistralApiKey('');
-    alert('API key cleared.');
-  };
-
   const handleDebugModeChange = (e) => {
     const checked = e.target.checked;
     setDebugMode(checked);
     localStorage.setItem('debugMode', checked);
     debugConfig.isDebugMode = checked;
-  };
-
-  const handleEnableOcrChange = (e) => {
-    const checked = e.target.checked;
-    setEnableOcr(checked);
-    localStorage.setItem('enableOcr', checked);
   };
 
   const handleDownloadAll = () => {
@@ -277,21 +216,6 @@ export default function PdfCompressor() {
               </div>
             </div>
             
-            <div className="feature-card">
-              <div className="feature-icon">🔍</div>
-              <div className="feature-content">
-                <h3>OCR Processing</h3>
-                <p>Extract and analyze text from your combined documents:</p>
-                <ul>
-                  <li>Securely uploads your PDF to AWS S3 with a temporary pre-signed URL</li>
-                  <li>Processes the document through Mistral AI&apos;s advanced OCR service</li>
-                  <li>Extracts text from all content, including images and scanned pages</li>
-                  <li>Automatically deletes your file from S3 after processing</li>
-                  <li>Provides document metadata and downloadable extracted text</li>
-                </ul>
-                <p className="feature-note">Your files remain private and are only temporarily stored during the OCR process.</p>
-              </div>
-            </div>
           </div>
         </details>
         
@@ -370,17 +294,8 @@ export default function PdfCompressor() {
           </div>
           <div className="api-settings">
             <details>
-              <summary>OCR Settings</summary>
+              <summary>Debug Settings</summary>
               <div className="api-key-settings">
-                <div className="option-row">
-                  <input 
-                    type="checkbox" 
-                    id="enableOcr"
-                    checked={enableOcr}
-                    onChange={handleEnableOcrChange}
-                  />
-                  <label htmlFor="enableOcr">Enable OCR analysis for combined PDF</label>
-                </div>
                 <div className="option-row">
                   <input 
                     type="checkbox" 
@@ -390,19 +305,6 @@ export default function PdfCompressor() {
                   />
                   <label htmlFor="debugMode">Enable Debug Mode (console logs)</label>
                 </div>
-                <label htmlFor="mistralApiKey">Mistral API Key:</label>
-                <div className="api-key-input">
-                  <input 
-                    type="password" 
-                    id="mistralApiKey" 
-                    placeholder="Enter your Mistral API key"
-                    value={mistralApiKey}
-                    onChange={(e) => setMistralApiKey(e.target.value)}
-                  />
-                  <button onClick={saveApiKey}>Save</button>
-                  <button onClick={clearApiKey}>Clear</button>
-                </div>
-                <p className="api-key-info">Required for analyzing combined PDFs with OCR. Your API key is stored locally in your browser.</p>
               </div>
             </details>
           </div>

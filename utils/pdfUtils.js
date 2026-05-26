@@ -13,16 +13,6 @@ if (typeof window !== 'undefined') {
   checkAndSetWorker();
 }
 
-// AWS Configuration - Will be populated from server
-let awsConfig = {
-  region: '',
-  credentials: {
-    accessKeyId: '',
-    secretAccessKey: ''
-  },
-  bucketName: ''
-};
-
 // Debug configuration
 export const debugConfig = {
   isDebugMode: false,
@@ -42,31 +32,6 @@ export const debugConfig = {
     console.error(message, ...args);
   }
 };
-
-// Load AWS configuration from server
-export async function loadAwsConfig() {
-  try {
-    debugConfig.log('Loading AWS configuration from server...');
-    const response = await fetch('/api/aws-config');
-    
-    if (!response.ok) {
-      throw new Error(`Failed to load AWS config: ${response.status} ${response.statusText}`);
-    }
-    
-    const config = await response.json();
-    
-    // Update the AWS config
-    awsConfig.region = config.region;
-    awsConfig.credentials.accessKeyId = config.credentials.accessKeyId;
-    awsConfig.credentials.secretAccessKey = config.credentials.secretAccessKey;
-    awsConfig.bucketName = config.bucketName;
-    
-    debugConfig.log('AWS configuration loaded successfully');
-  } catch (error) {
-    debugConfig.error('Error loading AWS configuration:', error);
-    throw error;
-  }
-}
 
 // Compress PDF file
 export async function compressPdf(file, quality, dpi, progressCallback) {

@@ -25,8 +25,6 @@ A comprehensive web application to compress and optimize multiple file types inc
 ### PDF-Specific Features
 - Adjustable image quality and DPI settings
 - Side-by-side comparison viewer
-- OCR analysis for combined PDFs via Mistral AI
-- AWS S3 integration for temporary file storage
 - PDF combination and reordering
 
 ### Image-Specific Features
@@ -67,18 +65,10 @@ The Universal File Compressor uses different compression strategies based on fil
 4. Uses GZIP compression for maximum reduction
 5. Preserves data integrity and readability
 
-### OCR Functionality (PDF)
-1. Combined PDFs are securely uploaded to AWS S3
-2. Mistral AI's OCR service processes documents
-3. Text is extracted from all content including images
-4. Files are automatically deleted from S3 after processing
-
 ## Setup
 
 ### Prerequisites
 - Node.js 16+
-- AWS account with S3 bucket
-- Mistral AI API key (for OCR functionality)
 
 ### Installation
 1. Clone the repository
@@ -92,20 +82,12 @@ The Universal File Compressor uses different compression strategies based on fil
    npm install
    ```
 
-3. Create a `.env` file with your AWS credentials:
-   ```
-   AWS_REGION=your-region
-   AWS_ACCESS_KEY_ID=your-access-key
-   AWS_SECRET_ACCESS_KEY=your-secret-key
-   AWS_BUCKET_NAME=your-bucket-name
-   ```
-
-4. Start the development server
+3. Start the development server
    ```bash
    npm run dev
    ```
 
-5. Open http://localhost:3000 in your browser
+4. Open http://localhost:3000 in your browser
 
 ### Production Build
 
@@ -146,7 +128,6 @@ npm start
 - Failed compressions are clearly indicated with error messages
 
 ### Special Features
-- **PDF OCR**: Enable in advanced settings with Mistral API key
 - **Format Conversion**: Convert images between formats (JPEG, PNG, WebP)
 - **GZIP Compression**: Maximum compression for text files
 - **Batch Processing**: Handle mixed file types in one operation
@@ -154,10 +135,7 @@ npm start
 ## Security Note
 
 - All PDF processing is done client-side
-- AWS credentials are securely handled server-side
-- S3 uploads use pre-signed URLs for secure, temporary access
-- Files uploaded to S3 are automatically deleted after OCR processing
-- Your Mistral API key is stored locally in your browser if you choose to save it
+- The app does not expose server-side AWS credentials to the browser
 
 ## Dependencies
 
@@ -187,7 +165,6 @@ You can easily reorder your PDF files before compression:
 ## Notes
 
 - PDF compression is done client-side; no files are uploaded to a server for compression
-- For OCR functionality, files are temporarily uploaded to S3 and automatically deleted after processing
 - Large PDFs may take more time to process
 - Text quality is dependent on the selected DPI and image quality settings
 
@@ -196,7 +173,5 @@ You can easily reorder your PDF files before compression:
 This application has been converted from a vanilla HTML/JavaScript app to a Next.js application:
 
 - **Frontend**: React components with hooks for state management
-- **Backend**: Next.js API routes for AWS configuration
 - **Styling**: Global CSS (preserved from original design)
 - **PDF Processing**: Client-side using PDF.js and pdf-lib
-- **OCR**: Mistral AI integration with AWS S3 for temporary storage 
