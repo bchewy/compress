@@ -352,8 +352,7 @@ export async function processLargePdfInChunks(pdfFile) {
 
 // Analyze combined PDF with Mistral OCR API (placeholder - needs full implementation)
 export async function analyzeCombinedPdfWithMistral(pdfFile) {
-  // This is a simplified version - the full implementation would include
-  // S3 upload, Mistral API calls, etc.
+  // This is a placeholder for a future client-safe OCR implementation.
   debugConfig.log('OCR analysis would be implemented here for:', pdfFile.name);
   
   // Return mock metadata for now

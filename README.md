@@ -144,7 +144,6 @@ npm start
 - [PDF.js](https://mozilla.github.io/pdf.js/) - For rendering PDF pages
 - [pdf-lib](https://pdf-lib.js.org/) - For creating new PDF files
 - [SortableJS](https://github.com/SortableJS/Sortable) - For drag and drop reordering
-- [dotenv](https://github.com/motdotla/dotenv) - For environment variable management
 
 ## Comparison Viewer
 

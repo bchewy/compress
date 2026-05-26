@@ -14,6 +14,7 @@ yarn-error.log*
 # Build files
 /build
 /dist
+/.next
 
 # IDE and editor files
 .idea/
